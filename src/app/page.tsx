@@ -3,7 +3,7 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
 import { CoreASTNode } from "@/types/ast";
 import { mockHeroAST } from "@/mocks/mockAst";
-import { SandboxToHostMessage } from "@/lib/bridge";
+import { sendBridgeMessage, createBridgeListener } from "@/lib/bridge";
 import { Monitor, Smartphone, Tablet, RefreshCw } from "lucide-react";
 
 // ============================================================
@@ -22,12 +22,12 @@ export default function WorkbenchPage() {
   const iframeRef = useRef<HTMLIFrameElement>(null);
 
   // ── 向 iframe 发送最新的 AST ──
-  const sendASTToSandbox = useCallback(
+  const syncASTToSandbox = useCallback(
     (astData: CoreASTNode) => {
-      if (!iframeRef.current?.contentWindow) return;
-      iframeRef.current.contentWindow.postMessage(
-        { type: "T2D2C_SYNC_AST", payload: { ast: astData } },
-        "*"
+      sendBridgeMessage(
+        iframeRef.current?.contentWindow ?? null,
+        "T2D2C_SYNC_AST",
+        { ast: astData }
       );
     },
     []
@@ -35,31 +35,26 @@ export default function WorkbenchPage() {
 
   // ── 监听来自沙盒的消息 ──
   useEffect(() => {
-    const handleMessage = (event: MessageEvent<SandboxToHostMessage>) => {
-      const msg = event.data;
-
-      // 握手信号
-      if (msg?.type === "T2D2C_SANDBOX_READY") {
+    const listener = createBridgeListener({
+      T2D2C_SANDBOX_READY: () => {
         setIsSandboxReady(true);
-        sendASTToSandbox(currentAST);
-      }
+        syncASTToSandbox(currentAST);
+      },
+      T2D2C_NODE_SELECTED: (payload) => {
+        setSelectedNodeId(payload.nodeId);
+      },
+    });
 
-      // 节点点击事件（Phase 1.3 预留）
-      if (msg?.type === "T2D2C_NODE_CLICKED" && msg.payload) {
-        setSelectedNodeId(msg.payload.nodeId);
-      }
-    };
-
-    window.addEventListener("message", handleMessage);
-    return () => window.removeEventListener("message", handleMessage);
-  }, [currentAST, sendASTToSandbox]);
+    window.addEventListener("message", listener);
+    return () => window.removeEventListener("message", listener);
+  }, [currentAST, syncASTToSandbox]);
 
   // ── AST 变化时自动同步到沙盒 ──
   useEffect(() => {
     if (isSandboxReady) {
-      sendASTToSandbox(currentAST);
+      syncASTToSandbox(currentAST);
     }
-  }, [currentAST, isSandboxReady, sendASTToSandbox]);
+  }, [currentAST, isSandboxReady, syncASTToSandbox]);
 
   // ── 视口容器尺寸控制 ──
   const viewportStyles: Record<string, string> = {
@@ -111,7 +106,7 @@ export default function WorkbenchPage() {
 
         <div className="flex items-center space-x-2">
           <button
-            onClick={() => sendASTToSandbox(currentAST)}
+            onClick={() => syncASTToSandbox(currentAST)}
             className="flex items-center text-xs bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 px-3 py-1.5 rounded-md transition"
           >
             <RefreshCw className="w-3.5 h-3.5 mr-1.5" />

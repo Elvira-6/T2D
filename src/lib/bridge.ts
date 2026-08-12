@@ -1,79 +1,85 @@
 import { CoreASTNode } from "@/types/ast";
 
 // ============================================================
-// Phase 1.2 — 主窗口 ↔ iframe 沙盒 通信协议
+// Phase 1.2 — 主窗口 ↔ iframe 沙盒 强类型通信协议
 // ============================================================
 
-// ── 主窗口 → iframe ──
-export interface SyncASTMessage {
-  type: "T2D2C_SYNC_AST";
-  payload: {
-    ast: CoreASTNode;
+// ── Payload 类型 ──
+export interface SyncASTPayload {
+  ast: CoreASTNode;
+}
+
+export interface NodeSelectPayload {
+  nodeId: string;
+  nodeType: string;
+  rect: {
+    top: number;
+    left: number;
+    width: number;
+    height: number;
   };
 }
 
-export interface HighlightNodeMessage {
-  type: "T2D2C_HIGHLIGHT_NODE";
-  payload: {
-    nodeId: string | null; // null = 取消高亮
-  };
-}
+// ── 统一消息协议映射 ──
+export type BridgeMessageMap = {
+  // Host → Sandbox
+  T2D2C_SYNC_AST: SyncASTPayload;
+  T2D2C_HIGHLIGHT_NODE: { nodeId: string | null };
 
-export interface SetViewportMessage {
-  type: "T2D2C_SET_VIEWPORT";
-  payload: {
-    width: number; // 视口宽度（px），用于模拟响应式断点
-  };
-}
+  // Sandbox → Host
+  T2D2C_SANDBOX_READY: undefined;
+  T2D2C_NODE_SELECTED: NodeSelectPayload;
+};
 
-// ── iframe → 主窗口 ──
-export interface SandboxReadyMessage {
-  type: "T2D2C_SANDBOX_READY";
-}
-
-export interface NodeClickedMessage {
-  type: "T2D2C_NODE_CLICKED";
-  payload: {
-    nodeId: string;
-    nodeType: string;
-    rect: {
-      top: number;
-      left: number;
-      width: number;
-      height: number;
-    };
-  };
-}
-
-// ── 联合类型 ──
-export type HostToSandboxMessage =
-  | SyncASTMessage
-  | HighlightNodeMessage
-  | SetViewportMessage;
-
-export type SandboxToHostMessage = SandboxReadyMessage | NodeClickedMessage;
+export type BridgeMessageType = keyof BridgeMessageMap;
 
 // ============================================================
-// 工具函数
+// 强类型发送 & 监听
 // ============================================================
 
 /**
- * 向 iframe 沙盒发送消息
+ * 强类型发送函数：给指定 targetWindow 发送 Bridge 消息。
+ * 如果 type 与 payload 类型不匹配，TS 编译直接报错。
+ *
+ * @example
+ *   sendBridgeMessage(iframe.contentWindow, "T2D2C_SYNC_AST", { ast });
+ *   sendBridgeMessage(window.parent, "T2D2C_SANDBOX_READY"); // no payload
  */
-export function postToSandbox(
-  iframe: HTMLIFrameElement,
-  message: HostToSandboxMessage
+export function sendBridgeMessage<T extends BridgeMessageType>(
+  targetWindow: Window | null,
+  type: T,
+  ...args: BridgeMessageMap[T] extends undefined
+    ? []
+    : [payload: BridgeMessageMap[T]]
 ): void {
-  if (!iframe.contentWindow) {
-    console.warn("[Bridge] iframe contentWindow 不可用");
+  if (!targetWindow) {
+    console.warn(`[Bridge] targetWindow 不可用，消息 ${type} 已丢弃`);
     return;
   }
-  iframe.contentWindow.postMessage(message, "*");
+  const payload = args[0];
+  targetWindow.postMessage({ type, payload }, "*");
 }
 
 /**
- * 向主窗口发送消息（在 iframe 内部调用）
+ * 强类型监听工厂：根据 message type 自动收窄 payload 类型。
+ *
+ * @example
+ *   const listener = createBridgeListener({
+ *     T2D2C_SYNC_AST: (payload) => setAst(payload.ast),   // payload: SyncASTPayload
+ *     T2D2C_SANDBOX_READY: () => setIsReady(true),        // payload: undefined
+ *   });
+ *   window.addEventListener("message", listener);
  */
-export function postToHost(message: SandboxToHostMessage): void {
-  window.parent.postMessage(message, "*");
+export function createBridgeListener(handlers: {
+  [K in BridgeMessageType]?: (payload: BridgeMessageMap[K]) => void;
+}) {
+  return (event: MessageEvent) => {
+    const data = event.data as { type?: BridgeMessageType; payload?: unknown };
+    if (!data || !data.type) return;
+
+    const handler = handlers[data.type];
+    if (handler) {
+      handler(data.payload as never);
+    }
+  };
 }

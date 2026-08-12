@@ -16,9 +16,24 @@ export const ComponentTypeSchema = z.enum([
 export type ComponentType = z.infer<typeof ComponentTypeSchema>;
 
 // ============================================================
-// 2. 核心 Core AST 节点 Schema（递归定义）
+// 2. 核心 Core AST 节点类型（手动定义，避免 z.lazy + z.infer 循环推导）
 // ============================================================
-export const CoreASTNodeSchema: z.ZodType<any> = z.lazy(() =>
+export interface CoreASTNode {
+  id: string;
+  type: ComponentType;
+  schemaVersion?: number;
+  props: {
+    className?: string;
+    text?: string;
+    src?: string;
+    href?: string;
+    [key: string]: any;
+  };
+  children?: CoreASTNode[];
+}
+
+// Zod Schema — 以上方 TypeScript 类型为目标进行校验
+export const CoreASTNodeSchema: z.ZodType<CoreASTNode> = z.lazy(() =>
   z
     .object({
       id: z.string().describe("节点唯一ID，用于选择与局部高亮"),
@@ -42,8 +57,6 @@ export const CoreASTNodeSchema: z.ZodType<any> = z.lazy(() =>
     })
     .passthrough()
 );
-
-export type CoreASTNode = z.infer<typeof CoreASTNodeSchema>;
 
 // ============================================================
 // 3. 辅助：创建节点的工厂函数
