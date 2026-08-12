@@ -9,15 +9,17 @@ export interface SyncASTPayload {
   ast: CoreASTNode;
 }
 
+export interface DOMRect {
+  top: number;
+  left: number;
+  width: number;
+  height: number;
+}
+
 export interface NodeSelectPayload {
   nodeId: string;
   nodeType: string;
-  rect: {
-    top: number;
-    left: number;
-    width: number;
-    height: number;
-  };
+  rect: DOMRect;
 }
 
 // ── 统一消息协议映射 ──
@@ -29,6 +31,7 @@ export type BridgeMessageMap = {
   // Sandbox → Host
   T2D2C_SANDBOX_READY: undefined;
   T2D2C_NODE_SELECTED: NodeSelectPayload;
+  T2D2C_NODE_DESELECTED: undefined;
 };
 
 export type BridgeMessageType = keyof BridgeMessageMap;
