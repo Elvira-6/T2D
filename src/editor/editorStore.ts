@@ -1,16 +1,17 @@
 "use client";
 
-import { useState, useCallback, useEffect, useMemo } from "react";
+import { useReducer, useCallback, useMemo, useEffect } from "react";
 import { CoreASTNode } from "@/types/ast";
 import { MutationCommand, MutationMeta } from "@/mutation/mutationTypes";
 import { applyMutation } from "@/mutation/mutationEngine";
-import { DOMRect } from "@/bridge/bridgeProtocol";
+import { DOMRectPayload, NodeGeometry } from "@/bridge/bridgeProtocol";
 import { findNodeById } from "@/lib/astUtils";
 
 // ============================================================
-// Phase 3.0 — Editor Store 与 Safe Selection
-// 解决「Undo 后 selectedNodeId 在最新 AST 中已被删除导致的漂移崩溃」。
-// 副作用统一放进 useEffect，useMemo 仅做纯计算。
+// Phase 3.1.1 — Editor Store（Reducer 单数据源）
+//   - Host 作为唯一 Source of Truth，Sandbox 仅作 Renderer。
+//   - 「选择状态」与「几何缓存」分离；Overlay 坐标 = iframe 相对 + offset。
+//   - Hover / Selection 直接携带 rect；Geometry 消息仅用于 resize/scroll/observer。
 // ============================================================
 
 export interface HistoryEntry {
@@ -19,93 +20,230 @@ export interface HistoryEntry {
   label: string;
 }
 
+export interface EditorState {
+  // AST 快照栈 + Command 记录（Undo/Redo）
+  astHistory: CoreASTNode[];
+  commandHistory: HistoryEntry[];
+  currentIndex: number;
+
+  // Selection（唯一数据源在 Host）
+  selectedNodeId: string | null;
+  selectedNodePath: string[]; // 面包屑层级路径（根 → 叶）
+
+  // Hover
+  hoverNodeId: string | null;
+
+  // Geometry Cache：按 nodeId 缓存 iframe 内相对坐标
+  geometryCache: Record<string, DOMRectPayload>;
+
+  // iframe 相对 Host Canvas 的偏移值
+  iframeOffset: { top: number; left: number };
+}
+
+type EditorAction =
+  | { type: "APPLY_MUTATION"; command: MutationCommand }
+  | { type: "UNDO" }
+  | { type: "REDO" }
+  | { type: "RESET_AST"; ast: CoreASTNode }
+  | { type: "SET_SELECTION"; nodeId: string | null; path?: string[]; rect?: DOMRectPayload }
+  | { type: "SET_HOVER"; nodeId: string | null; rect?: DOMRectPayload }
+  | { type: "UPDATE_GEOMETRY"; geometry: NodeGeometry }
+  | { type: "SET_IFRAME_OFFSET"; offset: { top: number; left: number } };
+
+function editorReducer(state: EditorState, action: EditorAction): EditorState {
+  switch (action.type) {
+    case "APPLY_MUTATION": {
+      const result = applyMutation(state.astHistory[state.currentIndex], action.command);
+      if (!result.changed) {
+        console.warn(`[Mutation Blocked/Failed]: ${result.error}`);
+        return state;
+      }
+      const meta = action.command.meta;
+      return {
+        ...state,
+        astHistory: [...state.astHistory.slice(0, state.currentIndex + 1), result.ast],
+        commandHistory: [
+          ...state.commandHistory.slice(0, state.currentIndex),
+          {
+            command: action.command,
+            timestamp: meta?.timestamp ?? 0,
+            label: meta?.label || action.command.action,
+          },
+        ],
+        currentIndex: state.currentIndex + 1,
+      };
+    }
+
+    case "UNDO": {
+      if (state.currentIndex <= 0) return state;
+      return { ...state, currentIndex: state.currentIndex - 1 };
+    }
+
+    case "REDO": {
+      if (state.currentIndex >= state.astHistory.length - 1) return state;
+      return { ...state, currentIndex: state.currentIndex + 1 };
+    }
+
+    case "RESET_AST": {
+      return {
+        ...state,
+        astHistory: [action.ast],
+        commandHistory: [],
+        currentIndex: 0,
+        selectedNodeId: null,
+        selectedNodePath: [],
+        hoverNodeId: null,
+        geometryCache: {},
+      };
+    }
+
+    case "SET_SELECTION": {
+      // 选中变更同时缓存其 rect（Hover/Selection payload 已携带 rect）
+      const geometryCache =
+        action.nodeId && action.rect
+          ? { ...state.geometryCache, [action.nodeId]: action.rect }
+          : state.geometryCache;
+      return {
+        ...state,
+        selectedNodeId: action.nodeId,
+        selectedNodePath: action.path ?? (action.nodeId ? [action.nodeId] : []),
+        geometryCache,
+      };
+    }
+
+    case "SET_HOVER": {
+      const geometryCache =
+        action.nodeId && action.rect
+          ? { ...state.geometryCache, [action.nodeId]: action.rect }
+          : state.geometryCache;
+      return { ...state, hoverNodeId: action.nodeId, geometryCache };
+    }
+
+    case "UPDATE_GEOMETRY": {
+      return {
+        ...state,
+        geometryCache: {
+          ...state.geometryCache,
+          [action.geometry.nodeId]: action.geometry.rect,
+        },
+      };
+    }
+
+    case "SET_IFRAME_OFFSET": {
+      return { ...state, iframeOffset: action.offset };
+    }
+
+    default:
+      return state;
+  }
+}
+
 export function useEditorStore(initialAST: CoreASTNode) {
-  // 核心 1：AST 快照栈与 Command 记录
-  const [astHistory, setAstHistory] = useState<CoreASTNode[]>([initialAST]);
-  const [commandHistory, setCommandHistory] = useState<HistoryEntry[]>([]);
-  const [currentIndex, setCurrentIndex] = useState<number>(0);
+  const [state, dispatch] = useReducer(editorReducer, {
+    astHistory: [initialAST],
+    commandHistory: [],
+    currentIndex: 0,
+    selectedNodeId: null,
+    selectedNodePath: [],
+    hoverNodeId: null,
+    geometryCache: {},
+    iframeOffset: { top: 0, left: 0 },
+  });
 
-  // 核心 2：Selection 状态收归统一 Store 管理
-  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
-  const [selectedRect, setSelectedRect] = useState<DOMRect | null>(null);
-
-  const currentAST = astHistory[currentIndex];
+  const currentAST = state.astHistory[state.currentIndex];
 
   // 纯计算：仅返回节点是否存在，不做任何副作用
   const selectedNode = useMemo(() => {
-    if (!selectedNodeId) return null;
-    return findNodeById(currentAST, selectedNodeId) ?? null;
-  }, [currentAST, selectedNodeId]);
+    if (!state.selectedNodeId) return null;
+    return findNodeById(currentAST, state.selectedNodeId) ?? null;
+  }, [currentAST, state.selectedNodeId]);
 
-  // 副作用统一放 effect：若选中节点已被删除，自动清空指针，防止漂移
+  // 副作用：选中节点被删除后自动清空指针，防止漂移
   useEffect(() => {
-    if (selectedNodeId && !findNodeById(currentAST, selectedNodeId)) {
-      setSelectedNodeId(null);
-      setSelectedRect(null);
+    if (state.selectedNodeId && !findNodeById(currentAST, state.selectedNodeId)) {
+      dispatch({ type: "SET_SELECTION", nodeId: null });
     }
-  }, [currentAST, selectedNodeId]);
+  }, [currentAST, state.selectedNodeId]);
 
-  const dispatchMutation = useCallback(
-    (command: MutationCommand) => {
-      const result = applyMutation(currentAST, command);
+  // iframe 相对坐标 + offset → Host Overlay 绝对坐标
+  const selectedOverlayRect = useMemo(() => {
+    if (!state.selectedNodeId) return null;
+    const raw = state.geometryCache[state.selectedNodeId];
+    if (!raw) return null;
+    return {
+      top: raw.top + state.iframeOffset.top,
+      left: raw.left + state.iframeOffset.left,
+      width: raw.width,
+      height: raw.height,
+    };
+  }, [state.selectedNodeId, state.geometryCache, state.iframeOffset]);
 
-      if (!result.changed) {
-        console.warn(`[Mutation Blocked/Failed]: ${result.error}`);
-        return result;
-      }
+  const hoverOverlayRect = useMemo(() => {
+    if (!state.hoverNodeId) return null;
+    const raw = state.geometryCache[state.hoverNodeId];
+    if (!raw) return null;
+    return {
+      top: raw.top + state.iframeOffset.top,
+      left: raw.left + state.iframeOffset.left,
+      width: raw.width,
+      height: raw.height,
+    };
+  }, [state.hoverNodeId, state.geometryCache, state.iframeOffset]);
 
-      const meta: MutationMeta =
-        command.meta ??
-        {
-          id: `mut_${Date.now()}`,
-          timestamp: Date.now(),
-          source: "INSPECTOR",
-          label: `${command.action} on ${
-            command.action === "INSERT_CHILD" ? command.parentId : command.targetId
-          }`,
-        };
-
-      setAstHistory((prev) => [...prev.slice(0, currentIndex + 1), result.ast]);
-      setCommandHistory((prev) => [
-        ...prev.slice(0, currentIndex),
-        { command, timestamp: meta.timestamp, label: meta.label || command.action },
-      ]);
-      setCurrentIndex((prev) => prev + 1);
-      return result;
-    },
-    [currentAST, currentIndex]
-  );
-
-  // 全量替换（AI 重新生成 / 流式生成每 chunk），清空历史栈与选中状态
-  const resetAST = useCallback((newAST: CoreASTNode) => {
-    setAstHistory([newAST]);
-    setCommandHistory([]);
-    setCurrentIndex(0);
-    setSelectedNodeId(null);
-    setSelectedRect(null);
+  const dispatchMutation = useCallback((command: MutationCommand) => {
+    // 默认 meta 在派发前注入，保持 reducer 纯函数
+    const meta: MutationMeta = command.meta ?? {
+      id: `mut_${Date.now()}`,
+      timestamp: Date.now(),
+      source: "INSPECTOR",
+      label: `${command.action} on ${
+        command.action === "INSERT_CHILD" ? command.parentId : command.targetId
+      }`,
+    };
+    const withMeta = { ...command, meta } as MutationCommand;
+    dispatch({ type: "APPLY_MUTATION", command: withMeta });
   }, []);
 
-  const undo = useCallback(() => {
-    if (currentIndex > 0) setCurrentIndex((prev) => prev - 1);
-  }, [currentIndex]);
-
-  const redo = useCallback(() => {
-    if (currentIndex < astHistory.length - 1) setCurrentIndex((prev) => prev + 1);
-  }, [currentIndex, astHistory.length]);
+  const resetAST = useCallback((ast: CoreASTNode) => dispatch({ type: "RESET_AST", ast }), []);
+  const setSelection = useCallback(
+    (nodeId: string | null, path?: string[], rect?: DOMRectPayload) =>
+      dispatch({ type: "SET_SELECTION", nodeId, path, rect }),
+    []
+  );
+  const setHover = useCallback(
+    (nodeId: string | null, rect?: DOMRectPayload) =>
+      dispatch({ type: "SET_HOVER", nodeId, rect }),
+    []
+  );
+  const updateGeometry = useCallback(
+    (geometry: NodeGeometry) => dispatch({ type: "UPDATE_GEOMETRY", geometry }),
+    []
+  );
+  const setIframeOffset = useCallback(
+    (offset: { top: number; left: number }) => dispatch({ type: "SET_IFRAME_OFFSET", offset }),
+    []
+  );
+  const undo = useCallback(() => dispatch({ type: "UNDO" }), []);
+  const redo = useCallback(() => dispatch({ type: "REDO" }), []);
 
   return {
     currentAST,
     selectedNode,
-    selectedNodeId,
-    selectedRect,
-    setSelectedNodeId,
-    setSelectedRect,
+    selectedNodeId: state.selectedNodeId,
+    selectedNodePath: state.selectedNodePath,
+    selectedOverlayRect,
+    hoverNodeId: state.hoverNodeId,
+    hoverOverlayRect,
+    commandHistory: state.commandHistory,
+    canUndo: state.currentIndex > 0,
+    canRedo: state.currentIndex < state.astHistory.length - 1,
     dispatchMutation,
     resetAST,
+    setSelection,
+    setHover,
+    updateGeometry,
+    setIframeOffset,
     undo,
     redo,
-    canUndo: currentIndex > 0,
-    canRedo: currentIndex < astHistory.length - 1,
-    commandHistory,
   };
 }

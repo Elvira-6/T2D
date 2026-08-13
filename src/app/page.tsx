@@ -3,8 +3,9 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
 import { CoreASTNode } from "@/types/ast";
 import { mockHeroAST } from "@/mocks/mockAst";
-import { DOMRect, sendBridgeMessage, createBridgeListener } from "@/lib/bridge";
-import { HostOverlay } from "@/components/HostOverlay";
+import { sendBridgeMessage, createBridgeListener } from "@/bridge/bridgeProtocol";
+import { CanvasOverlay } from "@/editor/CanvasOverlay";
+import { useEditorStore } from "@/editor/editorStore";
 import { useStreamAST } from "@/hooks/useStreamAST";
 import {
   Monitor,
@@ -15,26 +16,42 @@ import {
   Tag,
   Sparkles,
   Loader2,
+  Undo2,
+  Redo2,
 } from "lucide-react";
 
 // ============================================================
 // 主工作台页面（三栏布局）
 //   - 左栏：AI Prompt 交互对话框（Phase 2.1 接入 SSE 流式生成）
-//   - 中栏：iframe 沙盒画布 + 跨 iframe 高亮 Overlay
-//   - 右栏：Inspector 属性面板（实时展示选中节点信息）
+//   - 中栏：iframe 沙盒画布 + 跨 iframe 高亮 Overlay（Phase 3.1.1）
+//   - 右栏：Inspector 属性面板（实时展示选中节点信息 + 面包屑路径）
 // ============================================================
 export default function WorkbenchPage() {
-  const [currentAST, setCurrentAST] = useState<CoreASTNode>(mockHeroAST);
+  const {
+    currentAST,
+    selectedNode,
+    selectedNodeId,
+    selectedNodePath,
+    selectedOverlayRect,
+    hoverNodeId,
+    hoverOverlayRect,
+    commandHistory,
+    canUndo,
+    canRedo,
+    resetAST,
+    setSelection,
+    setHover,
+    updateGeometry,
+    setIframeOffset,
+    undo,
+    redo,
+  } = useEditorStore(mockHeroAST);
+
   const [isSandboxReady, setIsSandboxReady] = useState(false);
   const [viewportMode, setViewportMode] = useState<
     "desktop" | "tablet" | "mobile"
   >("desktop");
   const [isResizingViewport, setIsResizingViewport] = useState(false);
-
-  // 选中节点的坐标与 ID 状态
-  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
-  const [selectedNodeType, setSelectedNodeType] = useState<string | null>(null);
-  const [selectedRect, setSelectedRect] = useState<DOMRect | null>(null);
 
   // Prompt 输入框状态 + 流式生成 Hook
   const [promptInput, setPromptInput] = useState("");
@@ -42,26 +59,21 @@ export default function WorkbenchPage() {
 
   const iframeRef = useRef<HTMLIFrameElement>(null);
 
-  // ── 向 iframe 发送最新的 AST ──
+  // ── 向 iframe 发送最新的 AST（Envelope + Origin）──
   const syncASTToSandbox = useCallback((astData: CoreASTNode) => {
-    sendBridgeMessage(
-      iframeRef.current?.contentWindow ?? null,
-      "T2D2C_SYNC_AST",
-      { ast: astData }
-    );
+    const target = iframeRef.current?.contentWindow;
+    if (!target) return;
+    sendBridgeMessage(target, "T2D2C_SYNC_AST", { ast: astData });
   }, []);
 
   // ── 触发流式生成 ──
   const handleGenerate = useCallback(() => {
     if (!promptInput.trim() || isGenerating) return;
-    setSelectedNodeId(null);
-    setSelectedNodeType(null);
-    setSelectedRect(null);
-
+    setSelection(null);
     startStream(promptInput, (updatedAST) => {
-      setCurrentAST(updatedAST); // 自动通过 useEffect 触发 syncASTToSandbox
+      resetAST(updatedAST);
     });
-  }, [promptInput, isGenerating, startStream]);
+  }, [promptInput, isGenerating, startStream, setSelection, resetAST]);
 
   // ── 视口切换（支持动画暂隐防御，避免过渡期坐标漂移）──
   const handleViewportChange = (mode: "desktop" | "tablet" | "mobile") => {
@@ -75,46 +87,64 @@ export default function WorkbenchPage() {
     }, 320);
   };
 
-  // ── 监听来自沙盒的消息 ──
+  // ── 计算 iframe 相对 Host 视口的偏移（供坐标变换）──
+  const updateIframeOffset = useCallback(() => {
+    const el = iframeRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    setIframeOffset({ top: rect.top, left: rect.left });
+  }, [setIframeOffset]);
+
+  useEffect(() => {
+    updateIframeOffset();
+    window.addEventListener("resize", updateIframeOffset);
+    window.addEventListener("scroll", updateIframeOffset, true);
+    return () => {
+      window.removeEventListener("resize", updateIframeOffset);
+      window.removeEventListener("scroll", updateIframeOffset, true);
+    };
+  }, [updateIframeOffset]);
+
+  // iframe 尺寸变化（视口切换）时重测偏移
+  useEffect(() => {
+    const el = iframeRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => updateIframeOffset());
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [updateIframeOffset]);
+
+  // ── 监听来自沙盒的消息（版本 + Origin 校验内置于 createBridgeListener）──
   useEffect(() => {
     const listener = createBridgeListener({
       T2D2C_SANDBOX_READY: () => {
         setIsSandboxReady(true);
-        syncASTToSandbox(currentAST);
       },
       T2D2C_NODE_SELECTED: (payload) => {
-        setSelectedNodeId(payload.nodeId);
-        setSelectedNodeType(payload.nodeType);
-        setSelectedRect(payload.rect);
+        setSelection(payload.nodeId, payload.path, payload.rect);
       },
       T2D2C_NODE_DESELECTED: () => {
-        setSelectedNodeId(null);
-        setSelectedNodeType(null);
-        setSelectedRect(null);
+        setSelection(null);
+      },
+      T2D2C_NODE_HOVER: (payload) => {
+        setHover(payload.nodeId, payload.rect);
+      },
+      T2D2C_NODE_GEOMETRY_CHANGED: (geometry) => {
+        updateGeometry(geometry);
       },
     });
 
     window.addEventListener("message", listener);
     return () => window.removeEventListener("message", listener);
-  }, [currentAST, syncASTToSandbox]);
+  }, [setSelection, setHover, updateGeometry]);
 
-  // ── AST 变化时自动同步到沙盒（流式逐块触发）──
+  // ── AST 变化时自动同步到沙盒（流式逐块触发 / 握手后首推）──
   useEffect(() => {
     if (isSandboxReady) {
       syncASTToSandbox(currentAST);
+      updateIframeOffset();
     }
-  }, [currentAST, isSandboxReady, syncASTToSandbox]);
-
-  // ── 浏览器窗口 resize 时重置选择框（绝对坐标已失效）──
-  useEffect(() => {
-    const handleResize = () => {
-      setSelectedNodeId(null);
-      setSelectedNodeType(null);
-      setSelectedRect(null);
-    };
-    window.addEventListener("resize", handleResize);
-    return () => window.removeEventListener("resize", handleResize);
-  }, []);
+  }, [currentAST, isSandboxReady, syncASTToSandbox, updateIframeOffset]);
 
   // ── 视口容器尺寸控制 ──
   const viewportStyles: Record<string, string> = {
@@ -133,10 +163,12 @@ export default function WorkbenchPage() {
   return (
     <div className="flex flex-col h-screen w-screen bg-slate-950 text-slate-100 overflow-hidden font-sans">
       {/* ═══ 跨 iframe 高亮选择框 Overlay ═══ */}
-      <HostOverlay
-        iframeRef={iframeRef}
-        selectedNodeId={isResizingViewport ? null : selectedNodeId}
-        selectedRect={isResizingViewport ? null : selectedRect}
+      <CanvasOverlay
+        selectedOverlayRect={isResizingViewport ? null : selectedOverlayRect}
+        selectedNodeId={selectedNodeId}
+        selectedNodePath={selectedNodePath}
+        hoverOverlayRect={hoverOverlayRect}
+        hoverNodeId={hoverNodeId}
       />
 
       {/* ═══ 顶部 Header ═══ */}
@@ -147,7 +179,7 @@ export default function WorkbenchPage() {
             T2D2C Workspace
           </span>
           <span className="text-xs bg-slate-800 text-slate-400 px-2 py-0.5 rounded border border-slate-700">
-            Phase 2.1
+            Phase 3.1.1
           </span>
         </div>
 
@@ -169,13 +201,35 @@ export default function WorkbenchPage() {
           ))}
         </div>
 
-        <button
-          onClick={() => syncASTToSandbox(currentAST)}
-          className="flex items-center text-xs bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 px-3 py-1.5 rounded-md transition"
-        >
-          <RefreshCw className="w-3.5 h-3.5 mr-1.5" />
-          手动刷新沙盒
-        </button>
+        <div className="flex items-center space-x-2">
+          {/* Undo / Redo */}
+          <button
+            onClick={undo}
+            disabled={!canUndo}
+            className="flex items-center text-xs bg-slate-800 hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed border border-slate-700 text-slate-200 px-2.5 py-1.5 rounded-md transition"
+            title="撤销"
+          >
+            <Undo2 className="w-3.5 h-3.5 mr-1" />
+            撤销
+          </button>
+          <button
+            onClick={redo}
+            disabled={!canRedo}
+            className="flex items-center text-xs bg-slate-800 hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed border border-slate-700 text-slate-200 px-2.5 py-1.5 rounded-md transition"
+            title="重做"
+          >
+            <Redo2 className="w-3.5 h-3.5 mr-1" />
+            重做
+          </button>
+
+          <button
+            onClick={() => syncASTToSandbox(currentAST)}
+            className="flex items-center text-xs bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 px-3 py-1.5 rounded-md transition"
+          >
+            <RefreshCw className="w-3.5 h-3.5 mr-1.5" />
+            手动刷新沙盒
+          </button>
+        </div>
       </header>
 
       {/* ═══ 主体三栏布局 ═══ */}
@@ -241,60 +295,86 @@ export default function WorkbenchPage() {
         </main>
 
         {/* 右栏：Inspector 属性面板 */}
-        <aside className="w-72 border-l border-slate-800 bg-slate-900/30 p-4 flex-shrink-0 z-10">
+        <aside className="w-72 border-l border-slate-800 bg-slate-900/30 p-4 flex-shrink-0 z-10 overflow-y-auto">
           <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-4">
             Inspector
           </h3>
 
-          {selectedNodeId ? (
+          {selectedNodeId && selectedNode ? (
             <div className="space-y-4">
-              {/* 节点 ID */}
+              {/* 节点 ID + Type */}
               <div className="p-3 bg-slate-900 border border-slate-800 rounded-lg space-y-2">
                 <div className="flex items-center text-xs text-blue-400 font-mono">
                   <Box className="w-3.5 h-3.5 mr-1.5" />
-                  <span>Node ID</span>
+                  <span>Node</span>
                 </div>
                 <div className="text-xs font-semibold text-slate-200 pl-5 break-all">
                   {selectedNodeId}
                 </div>
-                {selectedNodeType && (
-                  <div className="text-[11px] text-slate-500 pl-5">
-                    type:{" "}
-                    <span className="text-indigo-400">{selectedNodeType}</span>
-                  </div>
-                )}
+                <div className="text-[11px] text-slate-500 pl-5">
+                  type:{" "}
+                  <span className="text-indigo-400">{selectedNode.type}</span>
+                </div>
               </div>
 
-              {/* 坐标数据 */}
-              {selectedRect && (
+              {/* 面包屑层级路径 */}
+              {selectedNodePath.length > 0 && (
                 <div className="p-3 bg-slate-900 border border-slate-800 rounded-lg space-y-2">
                   <div className="flex items-center text-xs text-indigo-400 font-mono">
                     <Tag className="w-3.5 h-3.5 mr-1.5" />
-                    <span>Calculated Rect</span>
+                    <span>Path</span>
+                  </div>
+                  <div className="flex flex-wrap gap-1 pl-5">
+                    {selectedNodePath.slice(-4).map((id, index) => (
+                      <React.Fragment key={id}>
+                        {index > 0 && (
+                          <span className="text-slate-600 text-[11px] leading-5">/</span>
+                        )}
+                        <span
+                          className={`text-[10px] font-mono px-1 py-0.5 rounded ${
+                            id === selectedNodeId
+                              ? "bg-blue-600/20 text-blue-300"
+                              : "bg-slate-800 text-slate-400"
+                          }`}
+                        >
+                          {id}
+                        </span>
+                      </React.Fragment>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Host 坐标数据 */}
+              {selectedOverlayRect && (
+                <div className="p-3 bg-slate-900 border border-slate-800 rounded-lg space-y-2">
+                  <div className="flex items-center text-xs text-indigo-400 font-mono">
+                    <Tag className="w-3.5 h-3.5 mr-1.5" />
+                    <span>Host Rect</span>
                   </div>
                   <div className="grid grid-cols-2 gap-2 text-[11px] font-mono text-slate-400 pl-5">
                     <div>
                       <span className="text-slate-600">W:</span>{" "}
-                      {Math.round(selectedRect.width)}px
+                      {Math.round(selectedOverlayRect.width)}px
                     </div>
                     <div>
                       <span className="text-slate-600">H:</span>{" "}
-                      {Math.round(selectedRect.height)}px
+                      {Math.round(selectedOverlayRect.height)}px
                     </div>
                     <div>
                       <span className="text-slate-600">X:</span>{" "}
-                      {Math.round(selectedRect.left)}px
+                      {Math.round(selectedOverlayRect.left)}px
                     </div>
                     <div>
                       <span className="text-slate-600">Y:</span>{" "}
-                      {Math.round(selectedRect.top)}px
+                      {Math.round(selectedOverlayRect.top)}px
                     </div>
                   </div>
                 </div>
               )}
 
               <div className="text-[11px] text-slate-500 leading-relaxed p-2 bg-slate-950/50 rounded border border-slate-800">
-                💡 滚动页面或切换视口，高亮框自动跟踪。点击空白区域取消选中。
+                💡 悬停显示虚线框，点击选中并显示面包屑路径。滚动/缩放时高亮框自动跟踪。
               </div>
             </div>
           ) : (
@@ -302,6 +382,12 @@ export default function WorkbenchPage() {
               点击画布中的 DOM 节点查看坐标联动...
             </div>
           )}
+
+          {/* History 状态 */}
+          <div className="mt-4 pt-3 border-t border-slate-800 text-[11px] text-slate-500 flex justify-between items-center">
+            <span>History</span>
+            <span className="font-mono">{commandHistory.length} edits</span>
+          </div>
         </aside>
       </div>
     </div>
