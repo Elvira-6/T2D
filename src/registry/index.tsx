@@ -1,9 +1,12 @@
 import React from "react";
 import { CoreASTNode, ComponentType } from "@/types/ast";
+import { sanitizeClassName } from "@/lib/sanitizer";
 
 // ============================================================
 // Component Registry — 单点注册模式 (Single Source of Truth)
 // ============================================================
+// 所有 render 与 exportCode 均接入 sanitizeClassName 防御管道，
+// 确保无论 LLM 输出多么混乱的 className，渲染结果都经过类型防护。
 
 /**
  * 组件规范接口：
@@ -19,7 +22,6 @@ export interface ComponentSpec {
   render: (opts: {
     node: CoreASTNode;
     children?: React.ReactNode;
-    onClick?: (e: React.MouseEvent, nodeId: string) => void;
     combinedClassName?: string;
   }) => React.ReactElement;
 
@@ -36,18 +38,22 @@ export const COMPONENT_REGISTRY: Record<ComponentType, ComponentSpec> = {
     defaultProps: {
       className: "w-full p-4 bg-background",
     },
-    render: ({ combinedClassName, onClick, node, children }) => (
-      <div
-        onClick={(e) => onClick?.(e, node.id)}
-        className={combinedClassName ?? node.props.className}
-        data-node-id={node.id}
-        data-node-type={node.type}
-      >
-        {children}
-      </div>
-    ),
-    exportCode: (node, childrenCode) =>
-      `<div className="${node.props.className ?? ""}">\n${childrenCode ?? ""}\n</div>`,
+    render: ({ node, combinedClassName, children }) => {
+      const safeClass = sanitizeClassName(node.props?.className, combinedClassName);
+      return (
+        <div
+          data-node-id={node.id}
+          data-node-type={node.type}
+          className={safeClass}
+        >
+          {children}
+        </div>
+      );
+    },
+    exportCode: (node, childrenCode) => {
+      const safeClass = sanitizeClassName(node.props?.className);
+      return `<div className="${safeClass}">\n${childrenCode ?? ""}\n</div>`;
+    },
   },
 
   // ----------------------------------------------------------
@@ -57,18 +63,22 @@ export const COMPONENT_REGISTRY: Record<ComponentType, ComponentSpec> = {
     defaultProps: {
       className: "flex items-center gap-4",
     },
-    render: ({ combinedClassName, onClick, node, children }) => (
-      <div
-        onClick={(e) => onClick?.(e, node.id)}
-        className={combinedClassName ?? node.props.className}
-        data-node-id={node.id}
-        data-node-type={node.type}
-      >
-        {children}
-      </div>
-    ),
-    exportCode: (node, childrenCode) =>
-      `<div className="${node.props.className ?? "flex"}">\n${childrenCode ?? ""}\n</div>`,
+    render: ({ node, combinedClassName, children }) => {
+      const safeClass = sanitizeClassName("flex", node.props?.className, combinedClassName);
+      return (
+        <div
+          data-node-id={node.id}
+          data-node-type={node.type}
+          className={safeClass}
+        >
+          {children}
+        </div>
+      );
+    },
+    exportCode: (node, childrenCode) => {
+      const safeClass = sanitizeClassName("flex", node.props?.className);
+      return `<div className="${safeClass}">\n${childrenCode ?? ""}\n</div>`;
+    },
   },
 
   // ----------------------------------------------------------
@@ -78,18 +88,22 @@ export const COMPONENT_REGISTRY: Record<ComponentType, ComponentSpec> = {
     defaultProps: {
       className: "grid grid-cols-3 gap-4",
     },
-    render: ({ combinedClassName, onClick, node, children }) => (
-      <div
-        onClick={(e) => onClick?.(e, node.id)}
-        className={combinedClassName ?? node.props.className}
-        data-node-id={node.id}
-        data-node-type={node.type}
-      >
-        {children}
-      </div>
-    ),
-    exportCode: (node, childrenCode) =>
-      `<div className="${node.props.className ?? "grid"}">\n${childrenCode ?? ""}\n</div>`,
+    render: ({ node, combinedClassName, children }) => {
+      const safeClass = sanitizeClassName("grid", node.props?.className, combinedClassName);
+      return (
+        <div
+          data-node-id={node.id}
+          data-node-type={node.type}
+          className={safeClass}
+        >
+          {children}
+        </div>
+      );
+    },
+    exportCode: (node, childrenCode) => {
+      const safeClass = sanitizeClassName("grid", node.props?.className);
+      return `<div className="${safeClass}">\n${childrenCode ?? ""}\n</div>`;
+    },
   },
 
   // ----------------------------------------------------------
@@ -100,18 +114,22 @@ export const COMPONENT_REGISTRY: Record<ComponentType, ComponentSpec> = {
       className: "text-2xl font-bold text-slate-900",
       text: "标题文本",
     },
-    render: ({ combinedClassName, onClick, node }) => (
-      <h2
-        onClick={(e) => onClick?.(e, node.id)}
-        className={combinedClassName ?? node.props.className}
-        data-node-id={node.id}
-        data-node-type={node.type}
-      >
-        {node.props.text}
-      </h2>
-    ),
-    exportCode: (node) =>
-      `<h2 className="${node.props.className ?? ""}">${node.props.text ?? ""}</h2>`,
+    render: ({ node, combinedClassName }) => {
+      const safeClass = sanitizeClassName("font-bold", node.props?.className, combinedClassName);
+      return (
+        <h2
+          data-node-id={node.id}
+          data-node-type={node.type}
+          className={safeClass}
+        >
+          {node.props?.text ?? ""}
+        </h2>
+      );
+    },
+    exportCode: (node) => {
+      const safeClass = sanitizeClassName("font-bold", node.props?.className);
+      return `<h2 className="${safeClass}">${node.props?.text ?? ""}</h2>`;
+    },
   },
 
   // ----------------------------------------------------------
@@ -122,18 +140,22 @@ export const COMPONENT_REGISTRY: Record<ComponentType, ComponentSpec> = {
       className: "text-base text-slate-600",
       text: "这是一段描述文本。",
     },
-    render: ({ combinedClassName, onClick, node }) => (
-      <p
-        onClick={(e) => onClick?.(e, node.id)}
-        className={combinedClassName ?? node.props.className}
-        data-node-id={node.id}
-        data-node-type={node.type}
-      >
-        {node.props.text}
-      </p>
-    ),
-    exportCode: (node) =>
-      `<p className="${node.props.className ?? ""}">${node.props.text ?? ""}</p>`,
+    render: ({ node, combinedClassName }) => {
+      const safeClass = sanitizeClassName(node.props?.className, combinedClassName);
+      return (
+        <p
+          data-node-id={node.id}
+          data-node-type={node.type}
+          className={safeClass}
+        >
+          {node.props?.text ?? ""}
+        </p>
+      );
+    },
+    exportCode: (node) => {
+      const safeClass = sanitizeClassName(node.props?.className);
+      return `<p className="${safeClass}">${node.props?.text ?? ""}</p>`;
+    },
   },
 
   // ----------------------------------------------------------
@@ -145,18 +167,29 @@ export const COMPONENT_REGISTRY: Record<ComponentType, ComponentSpec> = {
         "px-4 py-2 bg-blue-600 text-white rounded-md font-medium hover:bg-blue-700 transition",
       text: "点击按键",
     },
-    render: ({ combinedClassName, onClick, node }) => (
-      <button
-        onClick={(e) => onClick?.(e, node.id)}
-        className={combinedClassName ?? node.props.className}
-        data-node-id={node.id}
-        data-node-type={node.type}
-      >
-        {node.props.text}
-      </button>
-    ),
-    exportCode: (node) =>
-      `<button className="${node.props.className ?? ""}">${node.props.text ?? ""}</button>`,
+    render: ({ node, combinedClassName }) => {
+      const safeClass = sanitizeClassName(
+        "inline-flex items-center justify-center",
+        node.props?.className,
+        combinedClassName
+      );
+      return (
+        <button
+          data-node-id={node.id}
+          data-node-type={node.type}
+          className={safeClass}
+        >
+          {node.props?.text ?? ""}
+        </button>
+      );
+    },
+    exportCode: (node) => {
+      const safeClass = sanitizeClassName(
+        "inline-flex items-center justify-center",
+        node.props?.className
+      );
+      return `<button className="${safeClass}">${node.props?.text ?? ""}</button>`;
+    },
   },
 
   // ----------------------------------------------------------
@@ -167,18 +200,22 @@ export const COMPONENT_REGISTRY: Record<ComponentType, ComponentSpec> = {
       className: "w-full h-auto rounded-lg object-cover",
       src: "https://via.placeholder.com/600x400",
     },
-    render: ({ combinedClassName, onClick, node }) => (
-      <img
-        onClick={(e) => onClick?.(e, node.id)}
-        src={node.props.src}
-        alt={node.props.text ?? "image"}
-        className={combinedClassName ?? node.props.className}
-        data-node-id={node.id}
-        data-node-type={node.type}
-      />
-    ),
-    exportCode: (node) =>
-      `<img src="${node.props.src ?? ""}" alt="${node.props.text ?? ""}" className="${node.props.className ?? ""}" />`,
+    render: ({ node, combinedClassName }) => {
+      const safeClass = sanitizeClassName(node.props?.className, combinedClassName);
+      return (
+        <img
+          data-node-id={node.id}
+          data-node-type={node.type}
+          src={node.props?.src || "https://via.placeholder.com/600x400"}
+          alt={node.props?.text || "image"}
+          className={safeClass}
+        />
+      );
+    },
+    exportCode: (node) => {
+      const safeClass = sanitizeClassName(node.props?.className);
+      return `<img src="${node.props?.src || ""}" alt="${node.props?.text || ""}" className="${safeClass}" />`;
+    },
   },
 };
 

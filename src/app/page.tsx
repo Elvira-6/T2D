@@ -2,28 +2,43 @@
 
 import React, { useEffect, useRef, useState, useCallback } from "react";
 import { CoreASTNode } from "@/types/ast";
-import { mockHeroAST, mockSimpleCard } from "@/mocks/mockAst";
+import { mockHeroAST } from "@/mocks/mockAst";
 import { DOMRect, sendBridgeMessage, createBridgeListener } from "@/lib/bridge";
 import { HostOverlay } from "@/components/HostOverlay";
-import { Monitor, Smartphone, Tablet, RefreshCw, Box, Tag } from "lucide-react";
+import { useStreamAST } from "@/hooks/useStreamAST";
+import {
+  Monitor,
+  Smartphone,
+  Tablet,
+  RefreshCw,
+  Box,
+  Tag,
+  Sparkles,
+  Loader2,
+} from "lucide-react";
 
 // ============================================================
 // 主工作台页面（三栏布局）
-//   - 左栏：AI Chat 对话框（Phase 2 接入 LLM）
+//   - 左栏：AI Prompt 交互对话框（Phase 2.1 接入 SSE 流式生成）
 //   - 中栏：iframe 沙盒画布 + 跨 iframe 高亮 Overlay
 //   - 右栏：Inspector 属性面板（实时展示选中节点信息）
 // ============================================================
 export default function WorkbenchPage() {
-  const [currentAST, setCurrentAST] = useState<CoreASTNode>(mockSimpleCard);
+  const [currentAST, setCurrentAST] = useState<CoreASTNode>(mockHeroAST);
   const [isSandboxReady, setIsSandboxReady] = useState(false);
   const [viewportMode, setViewportMode] = useState<
     "desktop" | "tablet" | "mobile"
   >("desktop");
+  const [isResizingViewport, setIsResizingViewport] = useState(false);
 
-  // Phase 1.3: 选中节点的坐标与 ID 状态
+  // 选中节点的坐标与 ID 状态
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [selectedNodeType, setSelectedNodeType] = useState<string | null>(null);
   const [selectedRect, setSelectedRect] = useState<DOMRect | null>(null);
+
+  // Prompt 输入框状态 + 流式生成 Hook
+  const [promptInput, setPromptInput] = useState("");
+  const { isGenerating, startStream } = useStreamAST();
 
   const iframeRef = useRef<HTMLIFrameElement>(null);
 
@@ -35,6 +50,30 @@ export default function WorkbenchPage() {
       { ast: astData }
     );
   }, []);
+
+  // ── 触发流式生成 ──
+  const handleGenerate = useCallback(() => {
+    if (!promptInput.trim() || isGenerating) return;
+    setSelectedNodeId(null);
+    setSelectedNodeType(null);
+    setSelectedRect(null);
+
+    startStream(promptInput, (updatedAST) => {
+      setCurrentAST(updatedAST); // 自动通过 useEffect 触发 syncASTToSandbox
+    });
+  }, [promptInput, isGenerating, startStream]);
+
+  // ── 视口切换（支持动画暂隐防御，避免过渡期坐标漂移）──
+  const handleViewportChange = (mode: "desktop" | "tablet" | "mobile") => {
+    if (mode === viewportMode) return;
+    setIsResizingViewport(true);
+    setViewportMode(mode);
+
+    setTimeout(() => {
+      setIsResizingViewport(false);
+      syncASTToSandbox(currentAST);
+    }, 320);
+  };
 
   // ── 监听来自沙盒的消息 ──
   useEffect(() => {
@@ -59,14 +98,14 @@ export default function WorkbenchPage() {
     return () => window.removeEventListener("message", listener);
   }, [currentAST, syncASTToSandbox]);
 
-  // ── AST 变化时自动同步到沙盒 ──
+  // ── AST 变化时自动同步到沙盒（流式逐块触发）──
   useEffect(() => {
     if (isSandboxReady) {
       syncASTToSandbox(currentAST);
     }
   }, [currentAST, isSandboxReady, syncASTToSandbox]);
 
-  // ── 窗口 resize 时重置选择框（绝对坐标已失效）──
+  // ── 浏览器窗口 resize 时重置选择框（绝对坐标已失效）──
   useEffect(() => {
     const handleResize = () => {
       setSelectedNodeId(null);
@@ -76,13 +115,6 @@ export default function WorkbenchPage() {
     window.addEventListener("resize", handleResize);
     return () => window.removeEventListener("resize", handleResize);
   }, []);
-
-  // ── 清除选中 ──
-  const clearSelection = () => {
-    setSelectedNodeId(null);
-    setSelectedNodeType(null);
-    setSelectedRect(null);
-  };
 
   // ── 视口容器尺寸控制 ──
   const viewportStyles: Record<string, string> = {
@@ -103,8 +135,8 @@ export default function WorkbenchPage() {
       {/* ═══ 跨 iframe 高亮选择框 Overlay ═══ */}
       <HostOverlay
         iframeRef={iframeRef}
-        selectedNodeId={selectedNodeId}
-        selectedRect={selectedRect}
+        selectedNodeId={isResizingViewport ? null : selectedNodeId}
+        selectedRect={isResizingViewport ? null : selectedRect}
       />
 
       {/* ═══ 顶部 Header ═══ */}
@@ -115,7 +147,7 @@ export default function WorkbenchPage() {
             T2D2C Workspace
           </span>
           <span className="text-xs bg-slate-800 text-slate-400 px-2 py-0.5 rounded border border-slate-700">
-            Phase 1.3
+            Phase 2.1
           </span>
         </div>
 
@@ -124,10 +156,7 @@ export default function WorkbenchPage() {
           {viewportButtons.map(({ mode, Icon, label }) => (
             <button
               key={mode}
-              onClick={() => {
-                setViewportMode(mode);
-                clearSelection();
-              }}
+              onClick={() => handleViewportChange(mode)}
               className={`p-1.5 rounded transition ${
                 viewportMode === mode
                   ? "bg-blue-600 text-white"
@@ -140,55 +169,54 @@ export default function WorkbenchPage() {
           ))}
         </div>
 
-        <div className="flex items-center space-x-2">
-          <button
-            onClick={() => syncASTToSandbox(currentAST)}
-            className="flex items-center text-xs bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 px-3 py-1.5 rounded-md transition"
-          >
-            <RefreshCw className="w-3.5 h-3.5 mr-1.5" />
-            手动刷新沙盒
-          </button>
-        </div>
+        <button
+          onClick={() => syncASTToSandbox(currentAST)}
+          className="flex items-center text-xs bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 px-3 py-1.5 rounded-md transition"
+        >
+          <RefreshCw className="w-3.5 h-3.5 mr-1.5" />
+          手动刷新沙盒
+        </button>
       </header>
 
       {/* ═══ 主体三栏布局 ═══ */}
       <div className="flex-1 flex overflow-hidden">
-        {/* 左栏：AI Chat 对话框 */}
-        <aside className="w-80 border-r border-slate-800 bg-slate-900/30 p-4 flex flex-col justify-between flex-shrink-0">
-          <div className="space-y-4">
-            <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
+        {/* 左栏：AI Prompt 交互对话框 */}
+        <aside className="w-80 border-r border-slate-800 bg-slate-900/30 p-4 flex flex-col justify-between flex-shrink-0 z-10">
+          <div className="space-y-4 flex-1 flex flex-col">
+            <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider flex items-center">
+              <Sparkles className="w-3.5 h-3.5 mr-1.5 text-blue-400" />
               AI Prompt Agent
             </h3>
-            <div className="p-3 bg-slate-900 border border-slate-800 rounded-lg text-xs text-slate-300 leading-relaxed">
-              💬 输入需求（将于 Phase 2 接入 LangGraph 流式生成...）
-            </div>
 
-            {/* 快速切换 Mock */}
-            <div className="space-y-2">
+            <div className="flex-1 flex flex-col justify-end space-y-3">
+              <textarea
+                value={promptInput}
+                onChange={(e) => setPromptInput(e.target.value)}
+                placeholder="描述你想要的界面（例如：生成一个暗黑风格的 Landing Page 首屏）..."
+                className="w-full h-32 bg-slate-900 border border-slate-800 rounded-lg p-3 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-blue-500 transition resize-none"
+              />
               <button
-                onClick={() => { setCurrentAST(mockSimpleCard); clearSelection(); }}
-                className={`w-full text-left text-xs px-3 py-2 rounded border transition ${
-                  currentAST.id === mockSimpleCard.id
-                    ? "border-blue-600 bg-blue-600/10 text-blue-300"
-                    : "border-slate-700 text-slate-400 hover:text-slate-200"
-                }`}
+                onClick={handleGenerate}
+                disabled={isGenerating || !promptInput.trim()}
+                className="w-full py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-800 disabled:text-slate-600 text-white font-medium text-xs rounded-lg transition flex items-center justify-center space-x-2"
               >
-                📇 Mock: 简单卡片
-              </button>
-              <button
-                onClick={() => { setCurrentAST(mockHeroAST); clearSelection(); }}
-                className={`w-full text-left text-xs px-3 py-2 rounded border transition ${
-                  currentAST.id === mockHeroAST.id
-                    ? "border-blue-600 bg-blue-600/10 text-blue-300"
-                    : "border-slate-700 text-slate-400 hover:text-slate-200"
-                }`}
-              >
-                🦸 Mock: Hero Landing
+                {isGenerating ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    <span>流式生成 AST 中...</span>
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="w-3.5 h-3.5" />
+                    <span>开始生成界面</span>
+                  </>
+                )}
               </button>
             </div>
           </div>
-          <div className="p-2 border border-slate-800 rounded bg-slate-950 text-[11px] text-slate-500">
-            沙盒状态:{" "}
+
+          <div className="mt-4 p-2 border border-slate-800 rounded bg-slate-950 text-[11px] text-slate-500 flex justify-between">
+            <span>沙盒状态:</span>
             {isSandboxReady ? (
               <span className="text-emerald-400">Ready</span>
             ) : (
@@ -213,7 +241,7 @@ export default function WorkbenchPage() {
         </main>
 
         {/* 右栏：Inspector 属性面板 */}
-        <aside className="w-72 border-l border-slate-800 bg-slate-900/30 p-4 flex-shrink-0">
+        <aside className="w-72 border-l border-slate-800 bg-slate-900/30 p-4 flex-shrink-0 z-10">
           <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-4">
             Inspector
           </h3>
@@ -271,16 +299,7 @@ export default function WorkbenchPage() {
             </div>
           ) : (
             <div className="text-xs text-slate-500 italic leading-relaxed">
-              点击画布中的 DOM 节点查看选中效果...
-              <div className="mt-3 p-2 bg-slate-950/50 rounded border border-slate-800 text-[11px]">
-                已实现功能：
-                <ul className="list-disc pl-4 mt-1.5 space-y-0.5">
-                  <li>Click-to-Select 节点选中</li>
-                  <li>跨 iframe 物理坐标校准</li>
-                  <li>ResizeObserver 尺寸追踪</li>
-                  <li>Scroll 实时高亮跟随</li>
-                </ul>
-              </div>
+              点击画布中的 DOM 节点查看坐标联动...
             </div>
           )}
         </aside>
