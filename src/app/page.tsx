@@ -7,6 +7,8 @@ import { sendBridgeMessage, createBridgeListener } from "@/bridge/bridgeProtocol
 import { CanvasOverlay } from "@/editor/CanvasOverlay";
 import { useEditorStore } from "@/editor/editorStore";
 import { useStreamAST } from "@/hooks/useStreamAST";
+import { InspectorPanel } from "@/editor/InspectorPanel";
+import { SchemaField } from "@/inspector/schemaTypes";
 import {
   Monitor,
   Smartphone,
@@ -32,17 +34,16 @@ export default function WorkbenchPage() {
     selectedNode,
     selectedNodeId,
     selectedNodePath,
-    selectedOverlayRect,
+    selectedRect,
     hoverNodeId,
-    hoverOverlayRect,
+    hoverRect,
     commandHistory,
     canUndo,
     canRedo,
     resetAST,
     setSelection,
     setHover,
-    updateGeometry,
-    setIframeOffset,
+    dispatchMutation,
     undo,
     redo,
   } = useEditorStore(mockHeroAST);
@@ -58,6 +59,15 @@ export default function WorkbenchPage() {
   const { isGenerating, startStream } = useStreamAST();
 
   const iframeRef = useRef<HTMLIFrameElement>(null);
+  const [iframeOffset, setIframeOffset] = useState({ top: 0, left: 0 });
+
+  // ── 计算 iframe 相对 Host 视口的偏移（本地 state 即可，无需独立 Coordinate Layer）──
+  const measureIframeOffset = useCallback(() => {
+    const el = iframeRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    setIframeOffset({ top: rect.top, left: rect.left });
+  }, []);
 
   // ── 向 iframe 发送最新的 AST（Envelope + Origin）──
   const syncASTToSandbox = useCallback((astData: CoreASTNode) => {
@@ -65,6 +75,29 @@ export default function WorkbenchPage() {
     if (!target) return;
     sendBridgeMessage(target, "T2D2C_SYNC_AST", { ast: astData });
   }, []);
+
+  // ── Inspector 字段变更 → 派发 Mutation（SET_PROP / SET_DESIGN_TOKEN）──
+  const handleFieldChange = useCallback(
+    (field: SchemaField, value: unknown) => {
+      if (!selectedNodeId) return;
+      if (field.mutation.operation === "SET_DESIGN_TOKEN") {
+        dispatchMutation({
+          action: "SET_DESIGN_TOKEN",
+          targetId: selectedNodeId,
+          path: field.path,
+          value,
+        });
+      } else {
+        dispatchMutation({
+          action: "SET_PROP",
+          targetId: selectedNodeId,
+          path: field.path,
+          value,
+        });
+      }
+    },
+    [selectedNodeId, dispatchMutation]
+  );
 
   // ── 触发流式生成 ──
   const handleGenerate = useCallback(() => {
@@ -83,36 +116,17 @@ export default function WorkbenchPage() {
 
     setTimeout(() => {
       setIsResizingViewport(false);
+      measureIframeOffset();
       syncASTToSandbox(currentAST);
     }, 320);
   };
 
-  // ── 计算 iframe 相对 Host 视口的偏移（供坐标变换）──
-  const updateIframeOffset = useCallback(() => {
-    const el = iframeRef.current;
-    if (!el) return;
-    const rect = el.getBoundingClientRect();
-    setIframeOffset({ top: rect.top, left: rect.left });
-  }, [setIframeOffset]);
-
+  // 初始测量 + window.resize 时重测偏移
   useEffect(() => {
-    updateIframeOffset();
-    window.addEventListener("resize", updateIframeOffset);
-    window.addEventListener("scroll", updateIframeOffset, true);
-    return () => {
-      window.removeEventListener("resize", updateIframeOffset);
-      window.removeEventListener("scroll", updateIframeOffset, true);
-    };
-  }, [updateIframeOffset]);
-
-  // iframe 尺寸变化（视口切换）时重测偏移
-  useEffect(() => {
-    const el = iframeRef.current;
-    if (!el) return;
-    const ro = new ResizeObserver(() => updateIframeOffset());
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, [updateIframeOffset]);
+    measureIframeOffset();
+    window.addEventListener("resize", measureIframeOffset);
+    return () => window.removeEventListener("resize", measureIframeOffset);
+  }, [measureIframeOffset]);
 
   // ── 监听来自沙盒的消息（版本 + Origin 校验内置于 createBridgeListener）──
   useEffect(() => {
@@ -129,22 +143,19 @@ export default function WorkbenchPage() {
       T2D2C_NODE_HOVER: (payload) => {
         setHover(payload.nodeId, payload.rect);
       },
-      T2D2C_NODE_GEOMETRY_CHANGED: (geometry) => {
-        updateGeometry(geometry);
-      },
     });
 
     window.addEventListener("message", listener);
     return () => window.removeEventListener("message", listener);
-  }, [setSelection, setHover, updateGeometry]);
+  }, [setSelection, setHover]);
 
   // ── AST 变化时自动同步到沙盒（流式逐块触发 / 握手后首推）──
   useEffect(() => {
     if (isSandboxReady) {
       syncASTToSandbox(currentAST);
-      updateIframeOffset();
+      measureIframeOffset();
     }
-  }, [currentAST, isSandboxReady, syncASTToSandbox, updateIframeOffset]);
+  }, [currentAST, isSandboxReady, syncASTToSandbox, measureIframeOffset]);
 
   // ── 视口容器尺寸控制 ──
   const viewportStyles: Record<string, string> = {
@@ -164,11 +175,12 @@ export default function WorkbenchPage() {
     <div className="flex flex-col h-screen w-screen bg-slate-950 text-slate-100 overflow-hidden font-sans">
       {/* ═══ 跨 iframe 高亮选择框 Overlay ═══ */}
       <CanvasOverlay
-        selectedOverlayRect={isResizingViewport ? null : selectedOverlayRect}
+        selectedRect={isResizingViewport ? null : selectedRect}
         selectedNodeId={selectedNodeId}
         selectedNodePath={selectedNodePath}
-        hoverOverlayRect={hoverOverlayRect}
+        hoverRect={hoverRect}
         hoverNodeId={hoverNodeId}
+        iframeOffset={iframeOffset}
       />
 
       {/* ═══ 顶部 Header ═══ */}
@@ -300,8 +312,11 @@ export default function WorkbenchPage() {
             Inspector
           </h3>
 
+          {/* Phase 3.1.2 — Schema 驱动的属性编辑表单 */}
+          <InspectorPanel selectedNode={selectedNode} onFieldChange={handleFieldChange} />
+
           {selectedNodeId && selectedNode ? (
-            <div className="space-y-4">
+            <div className="space-y-4 mt-4 pt-3 border-t border-slate-800">
               {/* 节点 ID + Type */}
               <div className="p-3 bg-slate-900 border border-slate-800 rounded-lg space-y-2">
                 <div className="flex items-center text-xs text-blue-400 font-mono">
@@ -345,43 +360,39 @@ export default function WorkbenchPage() {
                 </div>
               )}
 
-              {/* Host 坐标数据 */}
-              {selectedOverlayRect && (
+              {/* 选中节点 iframe 相对坐标 */}
+              {selectedRect && (
                 <div className="p-3 bg-slate-900 border border-slate-800 rounded-lg space-y-2">
                   <div className="flex items-center text-xs text-indigo-400 font-mono">
                     <Tag className="w-3.5 h-3.5 mr-1.5" />
-                    <span>Host Rect</span>
+                    <span>Node Rect</span>
                   </div>
                   <div className="grid grid-cols-2 gap-2 text-[11px] font-mono text-slate-400 pl-5">
                     <div>
                       <span className="text-slate-600">W:</span>{" "}
-                      {Math.round(selectedOverlayRect.width)}px
+                      {Math.round(selectedRect.width)}px
                     </div>
                     <div>
                       <span className="text-slate-600">H:</span>{" "}
-                      {Math.round(selectedOverlayRect.height)}px
+                      {Math.round(selectedRect.height)}px
                     </div>
                     <div>
                       <span className="text-slate-600">X:</span>{" "}
-                      {Math.round(selectedOverlayRect.left)}px
+                      {Math.round(selectedRect.left)}px
                     </div>
                     <div>
                       <span className="text-slate-600">Y:</span>{" "}
-                      {Math.round(selectedOverlayRect.top)}px
+                      {Math.round(selectedRect.top)}px
                     </div>
                   </div>
                 </div>
               )}
 
               <div className="text-[11px] text-slate-500 leading-relaxed p-2 bg-slate-950/50 rounded border border-slate-800">
-                💡 悬停显示虚线框，点击选中并显示面包屑路径。滚动/缩放时高亮框自动跟踪。
+                💡 悬停显示虚线框，点击选中并显示面包屑路径与坐标。
               </div>
             </div>
-          ) : (
-            <div className="text-xs text-slate-500 italic leading-relaxed">
-              点击画布中的 DOM 节点查看坐标联动...
-            </div>
-          )}
+          ) : null}
 
           {/* History 状态 */}
           <div className="mt-4 pt-3 border-t border-slate-800 text-[11px] text-slate-500 flex justify-between items-center">

@@ -3,7 +3,7 @@ import { MutationCommand } from "@/mutation/mutationTypes";
 
 // ============================================================
 // Phase 3.1.1 — Bridge 协议（Envelope + Version + Origin）
-// 将「选择状态变更（State）」与「几何体重绘（Geometry）」职责彻底解耦。
+// iframe 沙盒 ↔ Host 编辑器的安全消息信封。
 // ============================================================
 
 export const BRIDGE_VERSION = "1.0";
@@ -22,15 +22,7 @@ export interface DOMRectPayload {
   height: number;
 }
 
-// 几何体上报：仅用于 resize / scroll / ResizeObserver 触发的坐标刷新，
-// 与 Hover / Selection 状态彻底解耦。
-export interface NodeGeometry {
-  nodeId: string;
-  rect: DOMRectPayload;
-  coordinate: "iframe";
-}
-
-// 选中节点：直接携带 rect + DOM 祖先路径（根 → 叶），支撑 Breadcrumb 层级导航
+// 选中节点：直接携带 rect + DOM 祖先路径（根 → 叶），支撑 Inspector 层级展示
 export interface NodeSelectPayload {
   nodeId: string;
   path?: string[];
@@ -47,13 +39,12 @@ export interface NodeHoverPayload {
 //   Host  → Sandbox：T2D2C_SYNC_AST
 //   Sandbox → Host：T2D2C_SANDBOX_READY、T2D2C_NODE_SELECTED、
 //                   T2D2C_NODE_HOVER、T2D2C_NODE_DESELECTED、
-//                   T2D2C_NODE_GEOMETRY_CHANGED、T2D2C_APPLY_MUTATION
+//                   T2D2C_APPLY_MUTATION
 export type BridgeMessageType =
   | "T2D2C_SANDBOX_READY" // Sandbox → Host：沙盒就绪握手
   | "T2D2C_NODE_SELECTED" // Sandbox → Host：选中节点（含 path 面包屑）
   | "T2D2C_NODE_HOVER" // Sandbox → Host：悬停节点
   | "T2D2C_NODE_DESELECTED" // Sandbox → Host：取消选中
-  | "T2D2C_NODE_GEOMETRY_CHANGED" // Sandbox → Host：几何更新（独立职责）
   | "T2D2C_SYNC_AST" // Host → Sandbox：全量 AST 同步（生成/撤销/重置）
   | "T2D2C_APPLY_MUTATION"; // Sandbox → Host：iframe 内操作上报为 Mutation Command
 
@@ -62,7 +53,6 @@ export interface BridgePayloadMap {
   T2D2C_NODE_SELECTED: NodeSelectPayload;
   T2D2C_NODE_HOVER: NodeHoverPayload;
   T2D2C_NODE_DESELECTED: undefined;
-  T2D2C_NODE_GEOMETRY_CHANGED: NodeGeometry;
   T2D2C_SYNC_AST: { ast: CoreASTNode };
   T2D2C_APPLY_MUTATION: { command: MutationCommand };
 }

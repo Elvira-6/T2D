@@ -35,6 +35,9 @@ export const mockHeroAST: CoreASTNode = {
             className: "text-lg text-slate-400",
             text: "输入 Prompt，自动规划布局、生成响应式 Component AST 并实时导出生产级干净代码。",
           },
+          design: {
+            color: "neutral",
+          },
         },
         {
           id: "hero_btn_group",
@@ -49,6 +52,10 @@ export const mockHeroAST: CoreASTNode = {
               props: {
                 className: "px-6 py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-semibold shadow-lg shadow-blue-500/30 transition",
                 text: "免费开始使用",
+              },
+              design: {
+                background: "primary",
+                radius: "lg",
               },
             },
             {

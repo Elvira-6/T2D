@@ -7,7 +7,6 @@ import {
   sendBridgeMessage,
   createBridgeListener,
   DOMRectPayload,
-  NodeGeometry,
 } from "@/bridge/bridgeProtocol";
 
 // ============================================================
@@ -36,19 +35,19 @@ const ASTRenderer: React.FC<{ node: CoreASTNode }> = ({ node }) => {
 
 // ============================================================
 // 沙盒预览页面（在 iframe 内部运行）
-// Phase 3.1.1: RAF 节流 Hover + Click 选中（Path + rect）+ 几何刷新 + ResizeObserver
+// Phase 3.1.1（收敛版）: RAF 节流 Hover + Click 选中（Path + rect）
 //   - Sandbox 仅作 Renderer，Selection 真相由 Host 独占持有。
-//   - geometryTargetRef 仅是「几何追踪目标」提示，用于滚动/缩放/尺寸变化时重测坐标。
+//   - 几何同步仅保留 window scroll + resize 重测；无 ResizeObserver / scroll 容器发现。
 // ============================================================
 export default function SandboxPage() {
   const [ast, setAst] = useState<CoreASTNode | null>(null);
 
-  const geometryTargetRef = useRef<string | null>(null);
   const hoverRafRef = useRef<number | null>(null);
   const lastHoverNodeIdRef = useRef<string | null>(null);
-  const resizeObserverRef = useRef<ResizeObserver | null>(null);
+  // 仅记忆「最近选中节点 id」用于 window.resize / AST 变更后重测坐标
+  const selectedNodeIdRef = useRef<string | null>(null);
 
-  // 抓取节点的 DOM 祖先树 Path（根 → 叶），供 Host Breadcrumb 导航
+  // 抓取节点的 DOM 祖先树 Path（根 → 叶），供 Host Inspector 层级展示
   const getNodePath = useCallback((element: HTMLElement): string[] => {
     const path: string[] = [];
     let curr: HTMLElement | null = element;
@@ -68,39 +67,39 @@ export default function SandboxPage() {
     return { top: r.top, left: r.left, width: r.width, height: r.height };
   }, []);
 
-  // 几何刷新（resize/scroll/ResizeObserver）专用：只重测坐标，不触达 Selection
-  const emitGeometry = useCallback((nodeId: string) => {
+  // 重发选中节点（用于 AST 变更 / 几何同步后刷新坐标）
+  const reemitSelected = useCallback(() => {
+    const nodeId = selectedNodeIdRef.current;
+    if (!nodeId) return;
+    const el = document.querySelector(`[data-node-id="${nodeId}"]`) as HTMLElement | null;
+    if (!el) {
+      selectedNodeIdRef.current = null;
+      return;
+    }
     const rect = getRect(nodeId);
-    if (!rect) return;
-    const geometry: NodeGeometry = { nodeId, rect, coordinate: "iframe" };
-    sendBridgeMessage(window.parent, "T2D2C_NODE_GEOMETRY_CHANGED", geometry);
+    const path = getNodePath(el);
+    if (rect) sendBridgeMessage(window.parent, "T2D2C_NODE_SELECTED", { nodeId, path, rect });
+  }, [getRect, getNodePath]);
+
+  // 重发悬停节点 rect（避免滚动后 hover 框漂移）
+  const reemitHover = useCallback(() => {
+    const nodeId = lastHoverNodeIdRef.current;
+    if (!nodeId) return;
+    const rect = getRect(nodeId);
+    if (rect) sendBridgeMessage(window.parent, "T2D2C_NODE_HOVER", { nodeId, rect });
   }, [getRect]);
 
-  // 观察选中节点自身尺寸变化（如 Inspector 修改 text），实时刷新几何
-  const observeNode = useCallback((el: HTMLElement) => {
-    if (resizeObserverRef.current) resizeObserverRef.current.disconnect();
-    const ro = new ResizeObserver(() => {
-      if (geometryTargetRef.current) emitGeometry(geometryTargetRef.current);
-    });
-    ro.observe(el);
-    resizeObserverRef.current = ro;
-  }, [emitGeometry]);
-
-  // 清空几何追踪目标 + 断开 ResizeObserver
-  const clearGeometryTarget = useCallback(() => {
-    geometryTargetRef.current = null;
-    if (resizeObserverRef.current) {
-      resizeObserverRef.current.disconnect();
-      resizeObserverRef.current = null;
-    }
-  }, []);
+  // 几何同步：选中 + 悬停节点坐标一并重发（scroll / resize 共用）
+  const syncGeometry = useCallback(() => {
+    reemitSelected();
+    reemitHover();
+  }, [reemitSelected, reemitHover]);
 
   // 1. 通信初始化 + Message 监听（版本 + Origin 校验内置于 createBridgeListener）
   useEffect(() => {
     const listener = createBridgeListener({
       T2D2C_SYNC_AST: (payload) => {
         setAst(payload.ast);
-        clearGeometryTarget();
         lastHoverNodeIdRef.current = null;
       },
     });
@@ -109,23 +108,27 @@ export default function SandboxPage() {
     sendBridgeMessage(window.parent, "T2D2C_SANDBOX_READY");
 
     return () => window.removeEventListener("message", listener);
-  }, [clearGeometryTarget]);
+  }, []);
 
-  // 2. resize / scroll（capture 捕获内层滚动容器）→ 重测当前选中节点几何
+  // 2. AST 变更后重测选中节点坐标（替代 ResizeObserver）
   useEffect(() => {
-    const handleGeometryRefresh = () => {
-      if (geometryTargetRef.current) emitGeometry(geometryTargetRef.current);
-    };
+    if (ast) reemitSelected();
+  }, [ast, reemitSelected]);
 
-    window.addEventListener("resize", handleGeometryRefresh);
-    window.addEventListener("scroll", handleGeometryRefresh, true);
+  // 3. 几何同步：iframe 内部 scroll / window.resize → 重测选中与悬停坐标
+  //    收敛版策略：仅监听 window scroll + resize，不做内部 scroll container discovery。
+  //    注：当前沙盒由 body 滚动（min-h-screen），故监听 window scroll；
+  //    若日后把画布包进 overflow-auto 容器，需把 scroll 监听改挂到该容器上。
+  useEffect(() => {
+    window.addEventListener("scroll", syncGeometry, { passive: true });
+    window.addEventListener("resize", syncGeometry);
     return () => {
-      window.removeEventListener("resize", handleGeometryRefresh);
-      window.removeEventListener("scroll", handleGeometryRefresh, true);
+      window.removeEventListener("scroll", syncGeometry);
+      window.removeEventListener("resize", syncGeometry);
     };
-  }, [emitGeometry]);
+  }, [syncGeometry]);
 
-  // 3. RAF 节流 Hover（60fps 上限，节点切换去重；rect 随 payload 一并携带）
+  // 4. RAF 节流 Hover（60fps 上限，节点切换去重；rect 随 payload 一并携带）
   const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
     const target = e.target as HTMLElement;
     if (hoverRafRef.current !== null) return;
@@ -147,31 +150,22 @@ export default function SandboxPage() {
     });
   };
 
-  // 4. Click 选择代理（Path + rect 一并携带，并观察该节点尺寸变化）
+  // 5. Click 选择代理（Path + rect 一并携带）
   const handleCanvasClick = (e: React.MouseEvent<HTMLDivElement>) => {
     const target = (e.target as HTMLElement).closest("[data-node-id]") as HTMLElement | null;
 
     if (target) {
       e.stopPropagation();
       const nodeId = target.getAttribute("data-node-id")!;
+      selectedNodeIdRef.current = nodeId;
       const path = getNodePath(target);
       const rect = getRect(nodeId);
-
-      geometryTargetRef.current = nodeId;
-      observeNode(target);
       if (rect) sendBridgeMessage(window.parent, "T2D2C_NODE_SELECTED", { nodeId, path, rect });
     } else {
-      clearGeometryTarget();
+      selectedNodeIdRef.current = null;
       sendBridgeMessage(window.parent, "T2D2C_NODE_DESELECTED");
     }
   };
-
-  // 卸载时清理 ResizeObserver
-  useEffect(() => {
-    return () => {
-      if (resizeObserverRef.current) resizeObserverRef.current.disconnect();
-    };
-  }, []);
 
   // ── 等待态 ──
   if (!ast) {

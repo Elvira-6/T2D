@@ -4,14 +4,14 @@ import { useReducer, useCallback, useMemo, useEffect } from "react";
 import { CoreASTNode } from "@/types/ast";
 import { MutationCommand, MutationMeta } from "@/mutation/mutationTypes";
 import { applyMutation } from "@/mutation/mutationEngine";
-import { DOMRectPayload, NodeGeometry } from "@/bridge/bridgeProtocol";
+import { DOMRectPayload } from "@/bridge/bridgeProtocol";
 import { findNodeById } from "@/lib/astUtils";
 
 // ============================================================
 // Phase 3.1.1 — Editor Store（Reducer 单数据源）
 //   - Host 作为唯一 Source of Truth，Sandbox 仅作 Renderer。
-//   - 「选择状态」与「几何缓存」分离；Overlay 坐标 = iframe 相对 + offset。
-//   - Hover / Selection 直接携带 rect；Geometry 消息仅用于 resize/scroll/observer。
+//   - 仅保存「当前选中/悬停」的 rect，不做全量 geometryCache。
+//   - Overlay 坐标 = iframe 相对 rect + iframeOffset（offset 在 page 侧本地计算）。
 // ============================================================
 
 export interface HistoryEntry {
@@ -29,15 +29,11 @@ export interface EditorState {
   // Selection（唯一数据源在 Host）
   selectedNodeId: string | null;
   selectedNodePath: string[]; // 面包屑层级路径（根 → 叶）
+  selectedRect: DOMRectPayload | null; // iframe 相对坐标
 
   // Hover
   hoverNodeId: string | null;
-
-  // Geometry Cache：按 nodeId 缓存 iframe 内相对坐标
-  geometryCache: Record<string, DOMRectPayload>;
-
-  // iframe 相对 Host Canvas 的偏移值
-  iframeOffset: { top: number; left: number };
+  hoverRect: DOMRectPayload | null; // iframe 相对坐标
 }
 
 type EditorAction =
@@ -46,9 +42,7 @@ type EditorAction =
   | { type: "REDO" }
   | { type: "RESET_AST"; ast: CoreASTNode }
   | { type: "SET_SELECTION"; nodeId: string | null; path?: string[]; rect?: DOMRectPayload }
-  | { type: "SET_HOVER"; nodeId: string | null; rect?: DOMRectPayload }
-  | { type: "UPDATE_GEOMETRY"; geometry: NodeGeometry }
-  | { type: "SET_IFRAME_OFFSET"; offset: { top: number; left: number } };
+  | { type: "SET_HOVER"; nodeId: string | null; rect?: DOMRectPayload };
 
 function editorReducer(state: EditorState, action: EditorAction): EditorState {
   switch (action.type) {
@@ -92,45 +86,27 @@ function editorReducer(state: EditorState, action: EditorAction): EditorState {
         currentIndex: 0,
         selectedNodeId: null,
         selectedNodePath: [],
+        selectedRect: null,
         hoverNodeId: null,
-        geometryCache: {},
+        hoverRect: null,
       };
     }
 
     case "SET_SELECTION": {
-      // 选中变更同时缓存其 rect（Hover/Selection payload 已携带 rect）
-      const geometryCache =
-        action.nodeId && action.rect
-          ? { ...state.geometryCache, [action.nodeId]: action.rect }
-          : state.geometryCache;
       return {
         ...state,
         selectedNodeId: action.nodeId,
         selectedNodePath: action.path ?? (action.nodeId ? [action.nodeId] : []),
-        geometryCache,
+        selectedRect: action.nodeId ? (action.rect ?? null) : null,
       };
     }
 
     case "SET_HOVER": {
-      const geometryCache =
-        action.nodeId && action.rect
-          ? { ...state.geometryCache, [action.nodeId]: action.rect }
-          : state.geometryCache;
-      return { ...state, hoverNodeId: action.nodeId, geometryCache };
-    }
-
-    case "UPDATE_GEOMETRY": {
       return {
         ...state,
-        geometryCache: {
-          ...state.geometryCache,
-          [action.geometry.nodeId]: action.geometry.rect,
-        },
+        hoverNodeId: action.nodeId,
+        hoverRect: action.nodeId ? (action.rect ?? null) : null,
       };
-    }
-
-    case "SET_IFRAME_OFFSET": {
-      return { ...state, iframeOffset: action.offset };
     }
 
     default:
@@ -145,9 +121,9 @@ export function useEditorStore(initialAST: CoreASTNode) {
     currentIndex: 0,
     selectedNodeId: null,
     selectedNodePath: [],
+    selectedRect: null,
     hoverNodeId: null,
-    geometryCache: {},
-    iframeOffset: { top: 0, left: 0 },
+    hoverRect: null,
   });
 
   const currentAST = state.astHistory[state.currentIndex];
@@ -164,31 +140,6 @@ export function useEditorStore(initialAST: CoreASTNode) {
       dispatch({ type: "SET_SELECTION", nodeId: null });
     }
   }, [currentAST, state.selectedNodeId]);
-
-  // iframe 相对坐标 + offset → Host Overlay 绝对坐标
-  const selectedOverlayRect = useMemo(() => {
-    if (!state.selectedNodeId) return null;
-    const raw = state.geometryCache[state.selectedNodeId];
-    if (!raw) return null;
-    return {
-      top: raw.top + state.iframeOffset.top,
-      left: raw.left + state.iframeOffset.left,
-      width: raw.width,
-      height: raw.height,
-    };
-  }, [state.selectedNodeId, state.geometryCache, state.iframeOffset]);
-
-  const hoverOverlayRect = useMemo(() => {
-    if (!state.hoverNodeId) return null;
-    const raw = state.geometryCache[state.hoverNodeId];
-    if (!raw) return null;
-    return {
-      top: raw.top + state.iframeOffset.top,
-      left: raw.left + state.iframeOffset.left,
-      width: raw.width,
-      height: raw.height,
-    };
-  }, [state.hoverNodeId, state.geometryCache, state.iframeOffset]);
 
   const dispatchMutation = useCallback((command: MutationCommand) => {
     // 默认 meta 在派发前注入，保持 reducer 纯函数
@@ -215,14 +166,6 @@ export function useEditorStore(initialAST: CoreASTNode) {
       dispatch({ type: "SET_HOVER", nodeId, rect }),
     []
   );
-  const updateGeometry = useCallback(
-    (geometry: NodeGeometry) => dispatch({ type: "UPDATE_GEOMETRY", geometry }),
-    []
-  );
-  const setIframeOffset = useCallback(
-    (offset: { top: number; left: number }) => dispatch({ type: "SET_IFRAME_OFFSET", offset }),
-    []
-  );
   const undo = useCallback(() => dispatch({ type: "UNDO" }), []);
   const redo = useCallback(() => dispatch({ type: "REDO" }), []);
 
@@ -231,9 +174,9 @@ export function useEditorStore(initialAST: CoreASTNode) {
     selectedNode,
     selectedNodeId: state.selectedNodeId,
     selectedNodePath: state.selectedNodePath,
-    selectedOverlayRect,
+    selectedRect: state.selectedRect,
     hoverNodeId: state.hoverNodeId,
-    hoverOverlayRect,
+    hoverRect: state.hoverRect,
     commandHistory: state.commandHistory,
     canUndo: state.currentIndex > 0,
     canRedo: state.currentIndex < state.astHistory.length - 1,
@@ -241,8 +184,6 @@ export function useEditorStore(initialAST: CoreASTNode) {
     resetAST,
     setSelection,
     setHover,
-    updateGeometry,
-    setIframeOffset,
     undo,
     redo,
   };

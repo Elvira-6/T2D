@@ -6,34 +6,38 @@ import { DOMRectPayload } from "@/bridge/bridgeProtocol";
 // ============================================================
 // Phase 3.1.1 — CanvasOverlay：Host 端绝对定位高亮图层
 //   - 覆盖在 <iframe> 上方（fixed inset-0），pointer-events-none。
-//   - selectedOverlayRect / hoverOverlayRect 已由 Store 完成 iframe→Host 坐标变换。
+//   - selectedRect / hoverRect 为 iframe 相对坐标，叠加 iframeOffset 后定位。
 // ============================================================
 
 interface CanvasOverlayProps {
-  selectedOverlayRect: DOMRectPayload | null;
+  selectedRect: DOMRectPayload | null;
   selectedNodeId: string | null;
   selectedNodePath: string[];
-  hoverOverlayRect: DOMRectPayload | null;
+  hoverRect: DOMRectPayload | null;
   hoverNodeId: string | null;
+  iframeOffset: { top: number; left: number };
 }
 
 export const CanvasOverlay: React.FC<CanvasOverlayProps> = ({
-  selectedOverlayRect,
+  selectedRect,
   selectedNodeId,
   selectedNodePath,
-  hoverOverlayRect,
+  hoverRect,
   hoverNodeId,
+  iframeOffset,
 }) => {
   return (
     <div className="fixed inset-0 pointer-events-none z-50 overflow-hidden">
       {/* 1. Hover Overlay 悬停高亮框 */}
-      {hoverOverlayRect && hoverNodeId && hoverNodeId !== selectedNodeId && (
+      {hoverRect && hoverNodeId && hoverNodeId !== selectedNodeId && (
         <div
           className="absolute border border-dashed border-blue-400 bg-blue-500/10 rounded-sm"
           style={{
-            width: `${hoverOverlayRect.width}px`,
-            height: `${hoverOverlayRect.height}px`,
-            transform: `translate3d(${hoverOverlayRect.left}px, ${hoverOverlayRect.top}px, 0)`,
+            width: `${hoverRect.width}px`,
+            height: `${hoverRect.height}px`,
+            transform: `translate3d(${hoverRect.left + iframeOffset.left}px, ${
+              hoverRect.top + iframeOffset.top
+            }px, 0)`,
           }}
         >
           <span className="absolute -top-5 left-0 bg-blue-500 text-white text-[10px] px-1 py-0.5 rounded font-mono shadow-sm">
@@ -43,13 +47,15 @@ export const CanvasOverlay: React.FC<CanvasOverlayProps> = ({
       )}
 
       {/* 2. Selection Overlay 选中高亮框 + Breadcrumb */}
-      {selectedOverlayRect && selectedNodeId && (
+      {selectedRect && selectedNodeId && (
         <div
           className="absolute border-2 border-blue-600 bg-blue-500/5 rounded-sm"
           style={{
-            width: `${selectedOverlayRect.width}px`,
-            height: `${selectedOverlayRect.height}px`,
-            transform: `translate3d(${selectedOverlayRect.left}px, ${selectedOverlayRect.top}px, 0)`,
+            width: `${selectedRect.width}px`,
+            height: `${selectedRect.height}px`,
+            transform: `translate3d(${selectedRect.left + iframeOffset.left}px, ${
+              selectedRect.top + iframeOffset.top
+            }px, 0)`,
           }}
         >
           {/* Breadcrumb Label（截取末 3 段，避免超长） */}

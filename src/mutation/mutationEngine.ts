@@ -42,7 +42,8 @@ export function applyMutation(
 
   function traverseAndMutate(node: CoreASTNode): CoreASTNode {
     switch (command.action) {
-      case "SET_PROP": {
+      case "SET_PROP":
+      case "SET_DESIGN_TOKEN": {
         if (node.id === command.targetId) {
           isNodeFound = true;
           return setDeepValue(node, command.path, command.value);

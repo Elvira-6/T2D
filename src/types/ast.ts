@@ -29,6 +29,20 @@ export interface CoreASTNode {
     href?: string;
     [key: string]: any;
   };
+  /**
+   * Design Token（Phase 3.1.2）：视觉属性收敛至 Design System Token，
+   * 例如 { background: "primary", radius: "md", padding: "lg" }。
+   * Inspector 通过 SET_DESIGN_TOKEN 修改，拒绝自由注入 Raw className。
+   */
+  design?: {
+    background?: string;
+    borderColor?: string;
+    color?: string;
+    radius?: string;
+    padding?: string;
+    margin?: string;
+    [key: string]: any;
+  };
   children?: CoreASTNode[];
 }
 
@@ -49,6 +63,19 @@ export const CoreASTNodeSchema: z.ZodType<CoreASTNode> = z.lazy(() =>
           href: z.string().optional().describe("链接地址"),
         })
         .passthrough(), // 关键：放行未知字段
+
+      design: z
+        .object({
+          background: z.string().optional().describe("背景色 Design Token"),
+          borderColor: z.string().optional().describe("边框色 Design Token"),
+          color: z.string().optional().describe("文字色 Design Token"),
+          radius: z.string().optional().describe("圆角 Design Token"),
+          padding: z.string().optional().describe("内边距 Design Token"),
+          margin: z.string().optional().describe("外边距 Design Token"),
+        })
+        .passthrough()
+        .optional()
+        .describe("Design System Token（Phase 3.1.2）"),
 
       children: z
         .array(z.lazy(() => CoreASTNodeSchema))

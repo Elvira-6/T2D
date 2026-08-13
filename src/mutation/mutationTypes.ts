@@ -18,8 +18,15 @@ export type MutationCommand =
   | {
       action: "SET_PROP";
       targetId: string;
-      path: string[];
+      path: string[]; // 业务属性路径，如 ["props", "text"] / ["props", "variant"]
       value: unknown;
+      meta?: MutationMeta;
+    }
+  | {
+      action: "SET_DESIGN_TOKEN";
+      targetId: string;
+      path: string[]; // 视觉 Token 路径，如 ["design", "background"]
+      value: unknown; // Token 值，如 "primary" / "md"
       meta?: MutationMeta;
     }
   | {
