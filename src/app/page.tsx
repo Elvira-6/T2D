@@ -9,6 +9,7 @@ import { useEditorStore } from "@/editor/editorStore";
 import { useStreamAST } from "@/hooks/useStreamAST";
 import { InspectorPanel } from "@/editor/InspectorPanel";
 import { SchemaField } from "@/inspector/schemaTypes";
+import { AgentRuntimePanel } from "@/agent/AgentRuntimePanel";
 import {
   Monitor,
   Smartphone,
@@ -246,15 +247,15 @@ export default function WorkbenchPage() {
 
       {/* ═══ 主体三栏布局 ═══ */}
       <div className="flex-1 flex overflow-hidden">
-        {/* 左栏：AI Prompt 交互对话框 */}
-        <aside className="w-80 border-r border-slate-800 bg-slate-900/30 p-4 flex flex-col justify-between flex-shrink-0 z-10">
-          <div className="space-y-4 flex-1 flex flex-col">
+        {/* 左栏：AI Prompt 交互对话框 + Agent Runtime 演示 */}
+        <aside className="w-80 border-r border-slate-800 bg-slate-900/30 flex flex-col flex-shrink-0 z-10 overflow-hidden">
+          <div className="p-4 space-y-4 flex-1 flex flex-col overflow-y-auto">
             <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider flex items-center">
               <Sparkles className="w-3.5 h-3.5 mr-1.5 text-blue-400" />
               AI Prompt Agent
             </h3>
 
-            <div className="flex-1 flex flex-col justify-end space-y-3">
+            <div className="space-y-3">
               <textarea
                 value={promptInput}
                 onChange={(e) => setPromptInput(e.target.value)}
@@ -279,9 +280,11 @@ export default function WorkbenchPage() {
                 )}
               </button>
             </div>
+
+            <AgentRuntimePanel />
           </div>
 
-          <div className="mt-4 p-2 border border-slate-800 rounded bg-slate-950 text-[11px] text-slate-500 flex justify-between">
+          <div className="px-4 py-3 border-t border-slate-800 bg-slate-950 text-[11px] text-slate-500 flex justify-between">
             <span>沙盒状态:</span>
             {isSandboxReady ? (
               <span className="text-emerald-400">Ready</span>

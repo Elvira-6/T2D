@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>T2D2C · Agent Runtime 图解</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<style>
+  :root {
+    /* —— 莫兰迪色系（低饱和、灰调）—— */
+    --bg: #f5f2ec;            /* 暖米白 */
+    --panel: #fdfcfa;         /* 奶白卡片 */
+    --border: #e4ded2;        /* 柔和暖灰边框 */
+    --text: #4a443e;          /* 深暖灰文字 */
+    --muted: #8a847a;         /* 辅助灰 */
+    --violet: #9c8fa8;        /* 灰紫 */
+    --violet-deep: #8a7a96;
+    --blue: #8fa3b0;          /* 雾霾蓝 */
+    --sage: #9caf88;          /* 鼠尾草绿 */
+    --rose: #c4a0a0;          /* 灰粉 */
+    /* 各色的浅色填充 */
+    --fill-violet: #e7e1ea;
+    --fill-blue:   #dfe7ec;
+    --fill-sage:   #e0e6d5;
+    --fill-rose:   #ecdddd;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+    line-height: 1.6;
+    padding: 40px 24px 80px;
+  }
+  .wrap { max-width: 1080px; margin: 0 auto; }
+  header { border-bottom: 1px solid var(--border); padding-bottom: 20px; margin-bottom: 8px; }
+  header h1 { font-size: 26px; margin: 0 0 6px; letter-spacing: 0.5px; }
+  header h1 .accent { color: var(--violet-deep); }
+  header p { color: var(--muted); margin: 0; font-size: 14px; }
+  .legend {
+    display: flex; flex-wrap: wrap; gap: 8px; margin: 20px 0;
+    font-size: 12px; color: var(--muted);
+  }
+  .legend .chip {
+    border: 1px solid var(--border); background: var(--panel);
+    border-radius: 999px; padding: 4px 12px;
+  }
+  section {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 28px;
+    margin-top: 28px;
+    box-shadow: 0 1px 3px rgba(74, 68, 62, 0.04);
+  }
+  section h2 {
+    font-size: 18px; margin: 0 0 4px;
+    display: flex; align-items: center; gap: 10px;
+  }
+  section h2 .num {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 26px; height: 26px; border-radius: 8px;
+    background: linear-gradient(135deg, var(--violet), var(--blue));
+    color: #fff; font-size: 13px; font-weight: 700;
+  }
+  section .sub { color: var(--muted); font-size: 13px; margin: 0 0 20px; }
+  .diagram {
+    background: #ffffff;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px;
+    overflow-x: auto;
+  }
+  .diagram .mermaid { display: flex; justify-content: center; }
+  .note {
+    margin-top: 18px; padding: 14px 16px;
+    border-left: 3px solid var(--violet);
+    background: var(--fill-violet);
+    border-radius: 8px; font-size: 13px; color: var(--text);
+  }
+  .note strong { color: var(--violet-deep); }
+  code {
+    background: rgba(156, 143, 168, 0.14);
+    padding: 1px 6px; border-radius: 5px;
+    font-family: "JetBrains Mono", "Consolas", monospace;
+    font-size: 12px; color: var(--violet-deep);
+  }
+  footer { text-align: center; color: var(--muted); font-size: 12px; margin-top: 40px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <h1>T2D2C Engine · <span class="accent">Agent Runtime</span> 图解</h1>
+    <p><code>src/agent/</code> — Phase 0 状态机骨架：Prompt → 规划 → 生成 AST → 校验 → 自愈 → 交付</p>
+  </header>
+
+  <div class="legend">
+    <span class="chip">● 阶段（Stage）：我在哪</span>
+    <span class="chip">● 动作（Action）：下一步干啥</span>
+    <span class="chip">● Tool：state in → state out</span>
+    <span class="chip">● 虚线/灰色 = Phase 0 预留未启用</span>
+  </div>
+
+  <!-- ============ 1. 状态机图 ============ -->
+  <section>
+    <h2><span class="num">1</span>状态机图 · AgentStage 阶段转移</h2>
+    <p class="sub">8 个阶段由「决策策略 decideNextAction」驱动转移，每个箭头上的标签是触发转移的动作。</p>
+    <div class="diagram">
+      <div class="mermaid">
+stateDiagram-v2
+    [*] --> IDLE : 初始化
+    IDLE --> PLANNING : PLAN
+    PLANNING --> GENERATING : GENERATE
+    GENERATING --> VALIDATING : VALIDATE
+    VALIDATING --> REPAIRING : REPAIR<br/>(errors &gt; 0)
+    REPAIRING --> VALIDATING : VALIDATE<br/>(errors 清空)
+    VALIDATING --> COMPLETED : DONE
+
+    IDLE --> FAILED : FAIL（步数耗尽）
+    PLANNING --> FAILED : FAIL
+    GENERATING --> FAILED : FAIL
+    VALIDATING --> FAILED : FAIL
+    REPAIRING --> FAILED : FAIL
+
+    WAITING_HUMAN : 预留阶段（人工介入，Phase 0 未接入）
+
+    COMPLETED --> [*]
+    FAILED --> [*]
+      </div>
+    </div>
+    <div class="note">
+      <strong>两个终态：</strong><code>COMPLETED</code>（正常交付）与 <code>FAILED</code>（步数耗尽）。
+      <strong>自愈回路：</strong><code>VALIDATING ⇄ REPAIRING</code>，校验发现 errors 就回退修复，修完重新校验。
+      <code>WAITING_HUMAN</code> 在类型里已定义，但当前决策策略从未跳到它——留给后续人工确认场景。
+    </div>
+  </section>
+
+  <!-- ============ 2. 流程图 ============ -->
+  <section>
+    <h2><span class="num">2</span>运行时流程图 · runAgent 主循环</h2>
+    <p class="sub">一个 <code>while(true)</code> 循环：每轮「步数 +1 → 决策 → 查表执行 → 记录事件」，直到命中终态。</p>
+    <div class="diagram">
+      <div class="mermaid">
+flowchart TD
+    A(["createInitialState(prompt)"]) --> B["state = 初始快照<br/>stage = IDLE"]
+    B --> C["stepCount += 1"]
+    C --> D{"decideNextAction(state)<br/>决策策略"}
+    D -- "DONE" --> E["stage = COMPLETED"]
+    D -- "FAIL" --> F["stage = FAILED"]
+    D -- "PLAN / GENERATE<br/>VALIDATE / REPAIR" --> G["记录 TOOL_CALL"]
+    G --> H["tool = TOOLS[action]<br/>查注册表"]
+    H --> I["next = await tool.execute(state)"]
+    I --> J["记录 TOOL_RESULT<br/>(含 duration 耗时)"]
+    J --> K["state = next<br/>不可变更新"]
+    K --> C
+    E --> L(["return state"])
+    F --> L
+
+    style E fill:#e0e6d5,stroke:#9caf88,color:#3f4a34
+    style F fill:#ecdddd,stroke:#c4a0a0,color:#6b4545
+    style D fill:#dfe7ec,stroke:#8fa3b0,color:#3a4a55
+    style G fill:#e7e1ea,stroke:#9c8fa8,color:#4a3f52
+    style J fill:#e7e1ea,stroke:#9c8fa8,color:#4a3f52
+      </div>
+    </div>
+    <div class="note">
+      <strong>事件成对记录：</strong>每次 Tool 调用记 <code>TOOL_CALL</code>（执行前）+ <code>TOOL_RESULT</code>（执行后，带耗时），
+      中间夹着真实执行，形成可回溯的时间线。<strong>不可变更新：</strong>每轮 <code>state</code> 都指向新对象，旧快照不被动。
+    </div>
+  </section>
+
+  <!-- ============ 3. 架构图 ============ -->
+  <section>
+    <h2><span class="num">3</span>架构图 · 五层依赖</h2>
+    <p class="sub">从上到下 5 层，箭头方向 = 依赖方向（A → B 表示 A 调用 / 引用 B）。核心一句话：<code>runtime</code> 是中枢，它「决策 → 执行 → 记录」，而一切向下依赖 <code>types.ts</code> 这块地基。</p>
+    <div class="diagram">
+      <div class="mermaid">
+flowchart TB
+    subgraph UI["① 表现层"]
+        PANEL["AgentRuntimePanel.tsx<br/>演示面板 + 事件时间线"]
+    end
+
+    subgraph EXPORT["② 公共出口层"]
+        INDEX["index.ts<br/>统一对外出口"]
+    end
+
+    subgraph RUNTIME["③ 运行时层 · 中枢"]
+        RT["runtime.ts<br/>runAgent 主循环"]
+    end
+
+    subgraph COLLAB["④ 协作层 · 三个独立职责"]
+        direction LR
+        POL["决策<br/>decision/policy.ts"]
+        TOOLS["执行<br/>tools/（4 个 Tool）"]
+        REC["记录<br/>state.ts + events.ts"]
+    end
+
+    subgraph CONTRACT["⑤ 契约层 · 地基"]
+        TYPES["types.ts<br/>Stage / Action / State / Event"]
+    end
+
+    PANEL -->|"调用"| INDEX
+    INDEX -->|"导出"| RT
+    RT -->|"1. 决策"| POL
+    RT -->|"2. 查表执行"| TOOLS
+    RT -->|"3. 记录事件"| REC
+    POL -->|"依赖"| TYPES
+    TOOLS -->|"依赖"| TYPES
+    REC -->|"依赖"| TYPES
+
+    style RT fill:#e7e1ea,stroke:#9c8fa8,color:#4a3f52
+    style TYPES fill:#dfe7ec,stroke:#8fa3b0,color:#3a4a55
+    style PANEL fill:#e0e6d5,stroke:#9caf88,color:#3f4a34
+      </div>
+    </div>
+    <div class="note">
+      <strong>怎么读：</strong>最上面的 UI 调用 <code>index.ts</code>，入口把 <code>runAgent</code> 暴露出去。
+      中间的 <code>runtime</code> 是<strong>中枢</strong>，它按循环顺序做三件事——<code>① 决策</code>（问 policy 下一步干啥）、
+      <code>② 执行</code>（按动作查 tools 注册表）、<code>③ 记录</code>（用 state/events 追加事件）。
+      而 policy / tools / state+events 三块都<strong>只依赖最底层的 types.ts</strong>——这就是「契约是地基」：
+      Phase 1~4 接入真实 LLM 时，只需替换 <code>tools</code> 这一块，其余层不动。
+    </div>
+  </section>
+
+  <!-- ============ 4. 事件时间线（时序） ============ -->
+  <section>
+    <h2><span class="num">4</span>事件时间线 · Event Trace 时序</h2>
+    <p class="sub">一次完整运行产出的 <code>AgentEvent[]</code> 序列，UI 面板据此渲染溯源时间线。</p>
+    <div class="diagram">
+      <div class="mermaid">
+sequenceDiagram
+    autonumber
+    participant U as UI Panel
+    participant R as runAgent
+    participant P as Policy
+    participant T as Tools
+    U->>R: runAgent(createInitialState(prompt))
+    R->>R: STATE_CHANGE → RUNNING
+    loop while(true)
+        R->>P: decideNextAction(state)
+        P-->>R: PLAN
+        R->>R: TOOL_CALL (planner)
+        R->>T: planner.execute(state)
+        T-->>R: { stage: PLANNING, plan }
+        R->>R: TOOL_RESULT (duration)
+        R->>P: decideNextAction(state)
+        P-->>R: GENERATE
+        R->>T: generator.execute(state)
+        T-->>R: { stage: GENERATING, ast }
+        R->>P: decideNextAction(state)
+        P-->>R: VALIDATE
+        R->>T: validator.execute(state)
+        T-->>R: { stage: VALIDATING, errors }
+        R->>P: decideNextAction(state)
+        P-->>R: DONE
+        R->>R: STATE_CHANGE → COMPLETED
+    end
+    R-->>U: 最终 AgentState（含 history）
+      </div>
+    </div>
+    <div class="note">
+      <strong>溯源能力：</strong>每次 <code>TOOL_CALL</code> / <code>TOOL_RESULT</code> 都带 <code>id</code>、<code>timestamp</code>、<code>duration</code>，
+      可在面板里完整回放「机器如何一步步走到终态」。图中省略了 REPAIR 分支，实际若 errors &gt; 0 会在 VALIDATE 后插入一轮 REPAIR。
+    </div>
+  </section>
+
+  <footer>生成于 T2D2C 项目 · 图表由 Mermaid 渲染 · 数据来源 <code>src/agent/</code> 源码</footer>
+</div>
+
+<script>
+  mermaid.initialize({
+    startOnLoad: true,
+    securityLevel: 'loose',
+    theme: 'base',
+    themeVariables: {
+      darkMode: false,
+      background: '#ffffff',
+      fontFamily: '"Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif',
+      fontSize: '14px',
+      // 节点
+      primaryColor: '#f5f2ec',
+      primaryTextColor: '#4a443e',
+      primaryBorderColor: '#9c8fa8',
+      secondaryColor: '#fdfcfa',
+      tertiaryColor: '#ffffff',
+      nodeTextColor: '#4a443e',
+      titleColor: '#4a443e',
+      // 连线 & 标签
+      lineColor: '#a9a197',
+      edgeLabelBackground: '#fdfcfa',
+      // 子图（subgraph）
+      clusterBkg: '#f5f2ec',
+      clusterBorder: '#e4ded2',
+      // 时序图
+      actorBkg: '#e7e1ea',
+      actorBorder: '#9c8fa8',
+      actorTextColor: '#4a443e',
+      actorLineColor: '#a9a197',
+      signalColor: '#4a443e',
+      signalTextColor: '#4a443e',
+      labelBoxBkgColor: '#f5f2ec',
+      labelBoxBorderColor: '#9c8fa8',
+      labelTextColor: '#4a443e',
+      loopTextColor: '#4a443e',
+      noteBkgColor: '#e0e6d5',
+      noteBorderColor: '#9caf88',
+      noteTextColor: '#3f4a34',
+      sequenceNumberColor: '#4a443e'
+    }
+  });
+</script>
+</body>
+</html>
