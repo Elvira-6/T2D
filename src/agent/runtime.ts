@@ -1,78 +1,101 @@
 import { AgentState } from "./types";
-import { decideNextAction } from "./decision/policy";
-import { TOOLS } from "./tools";
+import { decideNextAction } from "./controller";
+import { updateStage } from "./state";
 import { createEvent } from "./events";
-import { appendEvent } from "./state";
+import { runPlanner } from "./tools/planner.tool";
 
 // ============================================================
-// Phase 0 — Agent Runtime（状态机循环 + 事件溯源）
-//   while 循环驱动：决策 → 查表 → 执行 Tool → 记录事件 → 直到终态。
+// Phase 1 — Agent Runtime（状态机循环 + Event Trace）
+//   while 循环驱动：Controller 决策 → 执行器 → 记录事件 → 直到终态。
 // ============================================================
 
-export async function runAgent(initial: AgentState): Promise<AgentState> {
-  // 起始事件：记录进入运行循环（首次决策前，stage 仍为 initial.stage）
-  let state = appendEvent(
-    initial,
-    createEvent("STATE_CHANGE", {
-      source: "agent",
-      input: { stage: initial.stage },
+async function executePlan(state: AgentState): Promise<AgentState> {
+  let next = updateStage(state, "PLANNING");
+
+  next = {
+    ...next,
+    plannerAttempts: next.plannerAttempts + 1,
+  };
+
+  next.history.push(
+    createEvent("TOOL_CALL", {
+      tool: "planner",
+      attempt: next.plannerAttempts,
     })
   );
 
+  try {
+    const result = await runPlanner(state.prompt);
+
+    next = {
+      ...next,
+      plan: result.plan,
+      errors: [],
+    };
+
+    next.history.push(
+      createEvent("TOOL_RESULT", {
+        tool: "planner",
+        success: true,
+        attempt: next.plannerAttempts,
+      })
+    );
+
+    return next;
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Unknown planner error";
+
+    next.errors = [...next.errors, message];
+
+    next.history.push(
+      createEvent("ERROR", {
+        tool: "planner",
+        attempt: next.plannerAttempts,
+        error: message,
+      })
+    );
+
+    return next;
+  }
+}
+
+export async function runAgent(
+  initialState: AgentState
+): Promise<AgentState> {
+  let state = { ...initialState };
+
   while (true) {
     state = { ...state, stepCount: state.stepCount + 1 };
+
     const action = decideNextAction(state);
 
-    // 终态 1：正常完成
-    if (action === "DONE") {
-      state = { ...state, stage: "COMPLETED" };
-      return appendEvent(
-        state,
-        createEvent("STATE_CHANGE", {
-          source: "agent",
-          action,
-          output: { stage: "COMPLETED" },
-        })
-      );
+    switch (action) {
+      case "PLAN":
+        state = await executePlan(state);
+        break;
+
+      case "GENERATE":
+        /**
+         * Phase 1 边界：文档建议暂不让 Runtime 自动进入 Phase 2。
+         * 这里以 COMPLETED 作为正常完成边界，便于独立演示
+         * （区别于文档中的 throw "Generator not implemented yet."）。
+         */
+        return updateStage(state, "COMPLETED");
+
+      case "VALIDATE":
+        // Phase 3（Phase 1 不可达：ast 从未被设置，GENERATE 先触发）
+        return updateStage(state, "FAILED");
+
+      case "REPAIR":
+        // Phase 4（Phase 1 不可达）
+        return updateStage(state, "FAILED");
+
+      case "DONE":
+        return updateStage(state, "COMPLETED");
+
+      case "FAIL":
+        return updateStage(state, "FAILED");
     }
-
-    // 终态 2：步数耗尽
-    if (action === "FAIL") {
-      state = { ...state, stage: "FAILED" };
-      return appendEvent(
-        state,
-        createEvent("ERROR", {
-          source: "agent",
-          action,
-          output: { reason: "max steps exceeded" },
-        })
-      );
-    }
-
-    // 执行 Tool：记录 TOOL_CALL → execute → 记录 TOOL_RESULT（含耗时）
-    const tool = TOOLS[action];
-
-    state = appendEvent(
-      state,
-      createEvent("TOOL_CALL", {
-        source: "tool",
-        action,
-        input: { stage: state.stage, stepCount: state.stepCount },
-      })
-    );
-
-    const startedAt = Date.now();
-    const next = await tool.execute(state);
-    const duration = Date.now() - startedAt;
-
-    state = appendEvent(
-      next,
-      createEvent("TOOL_RESULT", {
-        source: "tool",
-        action,
-        output: { stage: next.stage },
-        duration,
-      })
-    );
   }
 }

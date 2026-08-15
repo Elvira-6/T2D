@@ -267,6 +267,67 @@ sequenceDiagram
     </div>
   </section>
 
+  <!-- ============ 5. UIPlan 契约 ============ -->
+  <section>
+    <h2><span class="num">5</span>UIPlan 契约 · 层级结构与约束</h2>
+    <p class="sub">
+      Planner 的结构化输出合同（<code>schemas/plan.schema.ts</code>）。
+      颜色标注字段约束类型：
+      <span style="color:#3a4a55">■ 蓝 = enum 枚举</span> ·
+      <span style="color:#4a3f52">■ 紫 = 字符串</span> ·
+      <span style="color:#3f4a34">■ 绿 = 版本锁</span> ·
+      <span style="color:#8a847a">■ 灰 = 数组/对象容器</span>
+    </p>
+    <div class="diagram">
+      <div class="mermaid">
+flowchart TB
+    UIPLAN["UIPlan<br/>顶层契约"]
+    UIPLAN --> VERSION["version : z.literal(1)"]
+    UIPLAN --> INTENT["intent : string · 1~300"]
+    UIPLAN --> PAGETYPE["pageType : enum · 8 种"]
+    UIPLAN --> SECTIONS["sections · 数组 1~12 个"]
+    UIPLAN --> DESIGN["design · 对象"]
+
+    SECTIONS --> SEC["SectionPlan · 区块"]
+    SEC --> SEC_ID["id : string · 1~50"]
+    SEC --> SEC_TYPE["type : enum · 7 种"]
+    SEC --> SEC_PURPOSE["purpose : string · 1~300"]
+    SEC --> SEC_LAYOUT["layout : enum · 4 种"]
+    SEC --> SEC_COMP["components · 数组 1~20 个"]
+
+    SEC_COMP --> COMP["ComponentIntent · 组件"]
+    COMP --> COMP_TYPE["type : enum · 7 种组件"]
+    COMP --> COMP_PURPOSE["purpose : string · 1~200"]
+
+    DESIGN --> D_THEME["theme : enum · 6 种"]
+    DESIGN --> D_SPACING["spacing : enum · 3 种"]
+    DESIGN --> D_RADIUS["radius : enum · 5 种"]
+    DESIGN --> D_COLOR["primaryColor : enum · 6 种"]
+
+    style VERSION fill:#e0e6d5,stroke:#9caf88,color:#3f4a34
+    style PAGETYPE fill:#dfe7ec,stroke:#8fa3b0,color:#3a4a55
+    style SEC_TYPE fill:#dfe7ec,stroke:#8fa3b0,color:#3a4a55
+    style SEC_LAYOUT fill:#dfe7ec,stroke:#8fa3b0,color:#3a4a55
+    style COMP_TYPE fill:#dfe7ec,stroke:#8fa3b0,color:#3a4a55
+    style D_THEME fill:#dfe7ec,stroke:#8fa3b0,color:#3a4a55
+    style D_SPACING fill:#dfe7ec,stroke:#8fa3b0,color:#3a4a55
+    style D_RADIUS fill:#dfe7ec,stroke:#8fa3b0,color:#3a4a55
+    style D_COLOR fill:#dfe7ec,stroke:#8fa3b0,color:#3a4a55
+    style INTENT fill:#e7e1ea,stroke:#9c8fa8,color:#4a3f52
+    style SEC_ID fill:#e7e1ea,stroke:#9c8fa8,color:#4a3f52
+    style SEC_PURPOSE fill:#e7e1ea,stroke:#9c8fa8,color:#4a3f52
+    style COMP_PURPOSE fill:#e7e1ea,stroke:#9c8fa8,color:#4a3f52
+      </div>
+    </div>
+    <div class="note">
+      <strong>为什么大量用 enum + min/max：</strong><br/>
+      <code>① enum 锁死选项 → 防 LLM 幻觉</code>——模型只能在这几个词里选，无法编造 <code>Carousel</code>、<code>neon-purple</code> 之类不存在的类型或色值；<br/>
+      <code>② z.literal(1) 锁版本 → 协议可迁移</code>——将来 UIPlan 结构变了，靠 version 字段识别旧数据做迁移，与 AST 的 <code>schemaVersion</code> 同理；<br/>
+      <code>③ min/max 限长度与数量 → 防失控</code>——例如 <code>sections</code> 最多 12 个，防止模型一口气生成 50 个区块撑爆下游 Generator；<br/>
+      <code>④ 组件 type 与 CoreASTNode 对齐 → Phase 2 无缝映射</code>——plan 里 7 个组件名与 AST 的 <code>ComponentType</code> 一字不差，plan 说「用 Button」，Generator 就能直接生成 Button 节点。
+    </div>
+  </section>
+
   <footer>生成于 T2D2C 项目 · 图表由 Mermaid 渲染 · 数据来源 <code>src/agent/</code> 源码</footer>
 </div>
 

@@ -1,14 +1,13 @@
 "use client";
 
 import { useCallback, useState } from "react";
-import { runAgent } from "./runtime";
-import { createInitialState } from "./state";
-import { AgentEvent, AgentState, AgentStage } from "./types";
+import type { AgentEvent, AgentStage, AgentState } from "./types";
 import { Play, Loader2, Terminal } from "lucide-react";
 
 // ============================================================
-// Phase 0 — Agent Runtime 演示面板
-//   一键跑通状态机，并可视化事件时间线（Event Trace）。
+// Phase 1 — Agent Runtime 演示面板
+//   通过 /api/agent/plan 在服务端跑 Agent 状态机，
+//   并可视化 UIPlan + 事件时间线（Event Trace）。
 // ============================================================
 
 const STAGE_COLOR: Record<AgentStage, string> = {
@@ -30,26 +29,30 @@ const EVENT_COLOR: Record<AgentEvent["type"], string> = {
   REPAIR: "text-orange-400",
 };
 
-/** 从事件 output 中提取简短说明（stage / reason） */
+/** 从事件 payload 中提取简短说明 */
 function eventDetail(ev: AgentEvent): string | null {
-  if (!ev.output || typeof ev.output !== "object") return null;
-  const o = ev.output as Record<string, unknown>;
-  if (typeof o.stage === "string") return o.stage;
-  if (typeof o.reason === "string") return o.reason;
+  const p = ev.payload;
+  if (!p || typeof p !== "object") return null;
+  if (typeof p.tool === "string") return String(p.tool);
+  if (typeof p.from === "string" && typeof p.to === "string") {
+    return `${p.from} → ${p.to}`;
+  }
+  if (typeof p.error === "string") return String(p.error);
   return null;
 }
 
 function EventRow({ ev }: { ev: AgentEvent }) {
   const detail = eventDetail(ev);
+  const attempt =
+    typeof ev.payload.attempt === "number" ? ` #${ev.payload.attempt}` : "";
   return (
     <div className="flex items-start space-x-1.5 text-[10px] font-mono leading-4">
       <span className={`${EVENT_COLOR[ev.type]} mt-0.5 leading-4`}>●</span>
-      <span className={`${EVENT_COLOR[ev.type]} whitespace-nowrap`}>{ev.type}</span>
-      {ev.action && <span className="text-slate-300">{ev.action}</span>}
+      <span className={`${EVENT_COLOR[ev.type]} whitespace-nowrap`}>
+        {ev.type}
+      </span>
+      {attempt && <span className="text-slate-500">{attempt}</span>}
       {detail && <span className="text-slate-500">→ {detail}</span>}
-      {ev.duration !== undefined && (
-        <span className="text-slate-600">{ev.duration}ms</span>
-      )}
     </div>
   );
 }
@@ -64,8 +67,21 @@ export function AgentRuntimePanel() {
     setError(null);
     setResult(null);
     try {
-      const r = await runAgent(createInitialState("生成一个 SaaS Landing Page"));
-      setResult(r);
+      const res = await fetch("/api/agent/plan", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          prompt:
+            "生成一个现代 SaaS Landing Page：hero 区 + 产品介绍 + 特性卡片 + CTA + footer，专业现代风格",
+        }),
+      });
+      const json = await res.json();
+      if (!json.ok) {
+        setError(json.error ?? "Agent failed");
+      } else {
+        console.log("planner result",json.result)
+        setResult(json.result as AgentState);
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -77,7 +93,7 @@ export function AgentRuntimePanel() {
     <div className="space-y-3 pt-3 border-t border-slate-800">
       <h4 className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider flex items-center">
         <Terminal className="w-3.5 h-3.5 mr-1.5 text-violet-400" />
-        Agent Runtime · Phase 0
+        Agent Runtime · Phase 1
       </h4>
 
       <button
@@ -88,12 +104,12 @@ export function AgentRuntimePanel() {
         {running ? (
           <>
             <Loader2 className="w-3.5 h-3.5 animate-spin" />
-            <span>状态机运行中...</span>
+            <span>Planner 运行中...</span>
           </>
         ) : (
           <>
             <Play className="w-3.5 h-3.5" />
-            <span>运行 Agent 状态机</span>
+            <span>运行 Planner Agent</span>
           </>
         )}
       </button>
@@ -115,9 +131,19 @@ export function AgentRuntimePanel() {
               steps={result.stepCount}
             </span>
             <span className="text-[10px] text-slate-500 font-mono">
+              attempts={result.plannerAttempts}/{result.maxPlannerAttempts}
+            </span>
+            <span className="text-[10px] text-slate-500 font-mono">
               errors={result.errors.length}
             </span>
           </div>
+
+          {/* 错误信息（若 planner 失败） */}
+          {result.errors.length > 0 && (
+            <div className="text-[10px] text-red-400 break-all">
+              {result.errors[result.errors.length - 1]}
+            </div>
+          )}
 
           {/* Planner 输出摘要 */}
           {result.plan && (
@@ -125,20 +151,19 @@ export function AgentRuntimePanel() {
               <div className="text-[10px] text-violet-300 font-mono">
                 plan: {result.plan.pageType}
               </div>
-              <div className="text-[10px] text-slate-500 font-mono">
-                sections: {result.plan.sections.map((s) => s.component).join(", ")}
+              <div className="text-[10px] text-slate-400 font-mono break-all">
+                intent: {result.plan.intent}
               </div>
-            </div>
-          )}
-
-          {/* Generator 输出摘要 */}
-          {result.ast && (
-            <div className="p-2 bg-slate-950 border border-slate-800 rounded space-y-1">
-              <div className="text-[10px] text-blue-300 font-mono">
-                ast: {result.ast.type} · {result.ast.id}
+              <div className="text-[10px] text-slate-500 font-mono break-all">
+                sections:{" "}
+                {result.plan.sections
+                  .map((s) => `${s.type}[${s.layout}]`)
+                  .join(" · ")}
               </div>
               <div className="text-[10px] text-slate-500 font-mono">
-                children: {result.ast.children?.length ?? 0}
+                design: {result.plan.design.theme} /{" "}
+                {result.plan.design.spacing} / {result.plan.design.radius} /{" "}
+                {result.plan.design.primaryColor}
               </div>
             </div>
           )}
