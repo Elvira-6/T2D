@@ -106,11 +106,7 @@ export const InspectorPanel: React.FC<InspectorPanelProps> = ({
   selectedNode,
   onFieldChange,
 }) => {
-  console.log("InspectorPanel",selectedNode)
   const schema = getInspectorSchema(selectedNode);
-  console.log(
-    "getInspectorSchema",schema
-  )
 
   if (!selectedNode || !schema) {
     return (

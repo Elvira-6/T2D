@@ -8,7 +8,9 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "test:schema": "tsx scripts/test-schema.ts"
+    "test:schema": "tsx scripts/test-schema.ts",
+    "test:runtime": "tsx scripts/test-tool-runtime.ts",
+    "demo:phase2": "tsx src/agent/phase2-demo.ts"
   },
   "dependencies": {
     "@ai-sdk/deepseek": "^3.0.28",

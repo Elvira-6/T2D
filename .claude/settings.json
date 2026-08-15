@@ -8,7 +8,8 @@
       "Bash(git remote *)",
       "Bash(git push *)",
       "Bash(git commit -m 'refactor: 强类型 Bridge 通信协议重构 *)",
-      "Bash(node -e \"console.log\\(require\\('./node_modules/zod/package.json'\\).main\\)\")"
+      "Bash(node -e \"console.log\\(require\\('./node_modules/zod/package.json'\\).main\\)\")",
+      "Bash(xargs grep -ln \"deepseek\\\\|baseURL\\\\|api.deepseek\\\\|getPlannerModel\\\\|openrouter\\\\|OPENAI_API\")"
     ],
     "additionalDirectories": [
       "d:\\Elvira_\\AI\\项目梳理\\T2C\\t2d2c-app\\src\\registry",
