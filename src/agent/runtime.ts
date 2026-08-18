@@ -1,18 +1,18 @@
-import { 
-  AgentState,
-  AgentStage,
-  AgentTrace 
-} from "./types";
+import { AgentState, AgentStage, AgentTrace } from "./types";
 
-import { decideNextAction } from "./controller";
+import { decideNextAction } from "./decision/engine";
+import { assertAgentToolName } from "./decision/engine";
+import type { AgentDecision } from "./decision/types";
 
-import { 
-  updateStage, 
-  appendEvent, 
-  appendTrace 
+import {
+  updateStage,
+  appendEvent,
+  appendTrace,
+  appendDecisionTrace,
 } from "./state";
 
 import { createEvent } from "./events";
+import { createDecisionTrace } from "./trace";
 
 import { UIPlan } from "./schemas/plan.schema";
 
@@ -25,13 +25,14 @@ import {
 } from "./tools";
 
 // ============================================================
-// Phase 2 — Agent Runtime（状态机循环 + Tool Executor + 双轨记录）
+// Phase 3.0 — Agent Runtime（状态机循环 + LLM Decision Engine + 三轨记录）
 //
-//   Controller 决策 → 统一走 Tool Executor →
-//     - history：记录生命周期（STATE_CHANGE / ERROR）
-//     - traces ：记录每次工具执行的完整细节（tool / status / duration / in-out）
+//   Decision Engine 决策（LLM）→ 统一走 Tool Executor →
+//     - history        ：生命周期（STATE_CHANGE / ERROR）+ 最小化 TOOL_CALL/TOOL_RESULT
+//     - traces         ：每次工具执行的完整细节（tool / status / duration / in-out）
+//     - decisionTraces ：每次决策的 action / tool / reason（回答「为什么做这个决定」）
 //
-//   Planner 不再被 Runtime 特殊对待，与 Retrieval 同属 AgentTool。
+//   decide 可注入：默认用 LLM 引擎，测试或回退时可换成 rule-based 控制器。
 // ============================================================
 
 /** 工具 → 对应阶段（用于 State Trace 的阶段迁移展示） */
@@ -39,6 +40,10 @@ const TOOL_STAGE: Record<AgentToolName, AgentStage> = {
   planner: "PLANNING",
   retrieve_design_context: "RETRIEVING",
 };
+
+type DecideFn = (
+  state: AgentState
+) => AgentDecision | Promise<AgentDecision>;
 
 function buildToolContext(state: AgentState): ToolContext {
   return {
@@ -87,7 +92,8 @@ function applyTrace(state: AgentState, trace: AgentTrace): AgentState {
 }
 
 export async function runAgent(
-  initialState: AgentState
+  initialState: AgentState,
+  decide: DecideFn = decideNextAction
 ): Promise<AgentState> {
   initTools();
 
@@ -96,7 +102,23 @@ export async function runAgent(
   while (true) {
     state = { ...state, stepCount: state.stepCount + 1 };
 
-    const decision = decideNextAction(state);
+    // 防死循环：步数上限（Runtime 的硬边界，不依赖 LLM 决策）。
+    if (state.stepCount >= state.maxSteps) {
+      state = updateStage(state, "FAILED");
+      return appendEvent(
+        state,
+        createEvent("ERROR", { reason: "max steps exceeded" })
+      );
+    }
+
+    const decision = await decide(state);
+    
+
+    // 记录 Decision Trace（回答「Agent 为什么做这个决定」）。
+    state = appendDecisionTrace(
+      state,
+      createDecisionTrace(decision, state.stepCount)
+    );
 
     if (decision.action === "DONE") {
       return updateStage(state, "COMPLETED");
@@ -110,13 +132,12 @@ export async function runAgent(
       );
     }
 
-    // CALL_TOOL
-    const tool = decision.tool;
+    // CALL_TOOL —— 最后一层防御性收窄（不信任上游决策）。
+    const tool = assertAgentToolName(decision.tool);
 
     if (tool === "planner") {
       state = { ...state, plannerAttempts: state.plannerAttempts + 1 };
     }
-
 
     const attempt = tool === "planner" ? state.plannerAttempts : undefined;
     const input = buildToolInput(state, tool);

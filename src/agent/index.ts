@@ -4,11 +4,43 @@
 // ============================================================
 
 export { runAgent } from "./runtime";
-export { decideNextAction } from "./controller";
-export type { AgentDecision } from "./controller";
-export { createInitialState, appendEvent, appendTrace, updateStage } from "./state";
+
+export {
+  decideNextAction,
+  validateDecisionTool,
+  assertAgentToolName,
+  buildDecisionContext,
+  buildDecisionPrompt,
+  AgentDecisionSchema,
+} from "./decision";
+
+export { decideNextActionByRule } from "./controller";
+
+export type {
+  DecisionAction,
+  AgentDecision,
+  AgentDecisionTrace,
+  ParsedAgentDecision,
+  DecisionContext,
+} from "./decision";
+
+export {
+  createInitialState,
+  appendEvent,
+  appendTrace,
+  appendDecisionTrace,
+  updateStage,
+} from "./state";
+
 export { createEvent, createEventId } from "./events";
-export { createTrace, createTraceId, buildToolTrace } from "./trace";
+
+export {
+  createTrace,
+  createTraceId,
+  buildToolTrace,
+  createDecisionTrace,
+  createDecisionTraceId,
+} from "./trace";
 export { plannerTool } from "./tools/planning/planner.tool";
 export { retrieveDesignContextTool } from "./tools/retrieval/designContext.tool";
 

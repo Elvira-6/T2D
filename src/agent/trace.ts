@@ -1,5 +1,6 @@
 import { AgentTrace } from "./types";
 import { ToolResult } from "./tools/types";
+import type { AgentDecision, AgentDecisionTrace } from "./decision/types";
 
 // ============================================================
 // Phase 2 — Trace 工厂（Tool 执行记录）
@@ -43,4 +44,29 @@ export function buildToolTrace(
     output: result.success ? result.data : undefined,
     error: result.error,
   });
+}
+
+let decisionSeq = 0;
+
+/** 生成 Decision Trace ID（前缀 decision_，与 Tool Trace 区分） */
+export function createDecisionTraceId(): string {
+  decisionSeq += 1;
+  return `decision_${decisionSeq}_${Date.now().toString(36)}`;
+}
+
+/**
+ * 从一条 AgentDecision 构建 Decision Trace（记录「Agent 为什么做这个决定」）。
+ */
+export function createDecisionTrace(
+  decision: AgentDecision,
+  step: number
+): AgentDecisionTrace {
+  return {
+    id: createDecisionTraceId(),
+    timestamp: Date.now(),
+    action: decision.action,
+    tool: decision.tool,
+    reason: decision.reason,
+    step,
+  };
 }

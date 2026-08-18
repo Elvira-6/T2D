@@ -1,5 +1,6 @@
 import { CoreASTNode } from "@/types/ast";
 import { UIPlan } from "./schemas/plan.schema";
+import type { AgentDecisionTrace } from "./decision/types";
 
 // ============================================================
 // Phase 2 — Agent Runtime 类型契约
@@ -101,6 +102,9 @@ export interface AgentState {
 
   /** Tool / Retrieval 执行记录（每次工具执行的完整细节） */
   traces: AgentTrace[];
+
+  /** Agent 决策记录（每次 decideNextAction 的 action / tool / reason，Phase 3.0） */
+  decisionTraces: AgentDecisionTrace[];
 
   /** Agent Runtime 循环执行的步数（每轮 while 循环 +1，含终态步） */
   stepCount: number;

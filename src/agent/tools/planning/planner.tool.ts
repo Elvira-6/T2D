@@ -1,6 +1,6 @@
 import { generateText, Output } from "ai";
 
-import { getPlannerModel } from "../../llm/model";
+import { getModel } from "../../llm/model";
 import { UIPlanSchema, UIPlan } from "../../schemas/plan.schema";
 import { AgentTool, ToolResult } from "../types";
 
@@ -95,7 +95,7 @@ export const plannerTool: AgentTool<string, UIPlan> = {
     }
 
     const result = await generateText({
-      model: getPlannerModel(),
+      model: getModel(),
 
       system: SYSTEM_PROMPT,
 

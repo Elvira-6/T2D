@@ -18,13 +18,13 @@ import { LanguageModel } from "ai";
  * 注意：与文档「顶层 throw」不同，这里采用惰性初始化：
  *   Next.js build / SSR 阶段会 import 本文件，若在顶层 throw，
  *   缺少 DEEPSEEK_API_KEY 会导致 build 失败。
- *   改为首次调用 getPlannerModel() 时才检查并抛错；
- *   错误会被 runtime 的 executePlan 捕获 → retry → FAILED（P1-05）。
+ *   改为首次调用 getModel() 时才检查并抛错；
+ *   错误会被 executor 捕获 → 转为 failed trace（由 Planner 或 Decision Engine 触发）。
  */
 
 let cached: LanguageModel | null = null;
 
-export function getPlannerModel(): LanguageModel {
+export function getModel(): LanguageModel {
   const apiKey = process.env.DEEPSEEK_API_KEY;
 
   if (!apiKey) {

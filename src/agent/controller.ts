@@ -1,19 +1,21 @@
 import { AgentState } from "./types";
-import { DEFAULT_TOOL_POLICY } from "./tools/policy";
-import { AgentToolName } from "./tools/types";
+import type { AgentDecision } from "./decision/types";
 
 // ============================================================
-// Phase 2 — Controller（决策 / Tool Routing）
-//   纯函数：根据 State 决定下一步是「调用哪个 Tool」还是「终态」。
-//   Phase 5 时这里的规则会替换为 LLM 自主决策。
+// Phase 3.0 — Rule-based Controller（保留作为 fallback / 安全网）
+//
+//   确定性决策：无 plan → planner；有 plan 无 context → retrieve；
+//   否则 DONE。主路径已切换到 LLM Decision Engine（decision/engine.ts），
+//   本文件不删除，供：
+//     1) LLM 决策失败时的回退；
+//     2) 离线测试注入（无真实 LLM 调用的确定性决策）。
+//
+//   返回值统一为 AgentDecision，与 LLM 引擎同一契约。
 // ============================================================
 
-export type AgentDecision =
-  | { action: "CALL_TOOL"; tool: AgentToolName }
-  | { action: "DONE" }
-  | { action: "FAIL"; reason: string };
-
-export function decideNextAction(state: AgentState): AgentDecision {
+export function decideNextActionByRule(
+  state: AgentState
+): AgentDecision {
   /**
    * Global safety boundary 1：步数上限
    */
@@ -21,13 +23,16 @@ export function decideNextAction(state: AgentState): AgentDecision {
     return { action: "FAIL", reason: "max steps exceeded" };
   }
 
-
   /**
    * 1. 还没有 Plan → 调用 planner（带重试上限）
    */
   if (!state.plan) {
     if (state.plannerAttempts < state.maxPlannerAttempts) {
-      return { action: "CALL_TOOL", tool: "planner" };
+      return {
+        action: "CALL_TOOL",
+        tool: "planner",
+        reason: "缺少页面规划，调用 planner 生成 UIPlan",
+      };
     }
 
     return { action: "FAIL", reason: "planner exceeded max attempts" };
@@ -37,11 +42,15 @@ export function decideNextAction(state: AgentState): AgentDecision {
    * 2. 有 Plan 但还没有设计上下文 → 检索 Design System
    */
   if (!state.contextData) {
-    return { action: "CALL_TOOL", tool: "retrieve_design_context" };
+    return {
+      action: "CALL_TOOL",
+      tool: "retrieve_design_context",
+      reason: "已有规划，获取 Design System 上下文",
+    };
   }
 
   /**
    * Phase 2 边界：尚无 Generator（Phase 3 加入）。
    */
-  return { action: "DONE" };
+  return { action: "DONE", reason: "规划与设计上下文均已就绪" };
 }

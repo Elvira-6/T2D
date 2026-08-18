@@ -1,4 +1,5 @@
 import { AgentState, AgentStage, AgentEvent, AgentTrace } from "./types";
+import type { AgentDecisionTrace } from "./decision/types";
 import { createEvent } from "./events";
 
 // ============================================================
@@ -17,6 +18,7 @@ export function createInitialState(
     errors: [],
     history: [],
     traces: [],
+    decisionTraces: [],
     stepCount: 0,
     maxSteps,
     plannerAttempts: 0,
@@ -33,6 +35,14 @@ export function appendEvent(state: AgentState, event: AgentEvent): AgentState {
 /** 追加一条 Tool Trace（返回新状态，保持不可变） */
 export function appendTrace(state: AgentState, trace: AgentTrace): AgentState {
   return { ...state, traces: [...state.traces, trace] };
+}
+
+/** 追加一条 Decision Trace（返回新状态，保持不可变） */
+export function appendDecisionTrace(
+  state: AgentState,
+  trace: AgentDecisionTrace
+): AgentState {
+  return { ...state, decisionTraces: [...state.decisionTraces, trace] };
 }
 
 /** 阶段迁移：记录 STATE_CHANGE 事件并返回新状态 */
