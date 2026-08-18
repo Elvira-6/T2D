@@ -21,15 +21,6 @@ export function decideNextAction(state: AgentState): AgentDecision {
     return { action: "FAIL", reason: "max steps exceeded" };
   }
 
-  /**
-   * Global safety boundary 2：工具调用次数上限（与 Policy 对齐，避免死循环）
-   */
-  if (state.toolCallCount >= DEFAULT_TOOL_POLICY.maxToolCalls) {
-    return {
-      action: "FAIL",
-      reason: `max tool calls exceeded (${DEFAULT_TOOL_POLICY.maxToolCalls})`,
-    };
-  }
 
   /**
    * 1. 还没有 Plan → 调用 planner（带重试上限）

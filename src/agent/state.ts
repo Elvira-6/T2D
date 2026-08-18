@@ -1,4 +1,4 @@
-import { AgentState, AgentStage, AgentEvent } from "./types";
+import { AgentState, AgentStage, AgentEvent, AgentTrace } from "./types";
 import { createEvent } from "./events";
 
 // ============================================================
@@ -28,6 +28,11 @@ export function createInitialState(
 /** 追加一条生命周期事件（返回新状态，不就地修改，保持不可变） */
 export function appendEvent(state: AgentState, event: AgentEvent): AgentState {
   return { ...state, history: [...state.history, event] };
+}
+
+/** 追加一条 Tool Trace（返回新状态，保持不可变） */
+export function appendTrace(state: AgentState, trace: AgentTrace): AgentState {
+  return { ...state, traces: [...state.traces, trace] };
 }
 
 /** 阶段迁移：记录 STATE_CHANGE 事件并返回新状态 */

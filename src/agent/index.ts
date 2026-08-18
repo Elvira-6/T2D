@@ -6,7 +6,7 @@
 export { runAgent } from "./runtime";
 export { decideNextAction } from "./controller";
 export type { AgentDecision } from "./controller";
-export { createInitialState, appendEvent, updateStage } from "./state";
+export { createInitialState, appendEvent, appendTrace, updateStage } from "./state";
 export { createEvent, createEventId } from "./events";
 export { createTrace, createTraceId, buildToolTrace } from "./trace";
 export { plannerTool } from "./tools/planning/planner.tool";

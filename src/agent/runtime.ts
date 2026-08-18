@@ -1,15 +1,26 @@
-import { AgentState, AgentStage } from "./types";
+import { 
+  AgentState,
+  AgentStage,
+  AgentTrace 
+} from "./types";
+
 import { decideNextAction } from "./controller";
-import { updateStage, appendEvent } from "./state";
+
+import { 
+  updateStage, 
+  appendEvent, 
+  appendTrace 
+} from "./state";
+
 import { createEvent } from "./events";
-import { buildToolTrace } from "./trace";
+
 import { UIPlan } from "./schemas/plan.schema";
+
 import {
   initTools,
   executeTool,
   DEFAULT_TOOL_POLICY,
   ToolContext,
-  ToolResult,
   AgentToolName,
 } from "./tools";
 
@@ -48,26 +59,27 @@ function buildToolInput(state: AgentState, tool: AgentToolName): unknown {
   }
 }
 
-/** 把 ToolResult 写回 AgentState（Runtime 才是 State 的唯一写入者） */
-function applyToolResult(
-  state: AgentState,
-  tool: AgentToolName,
-  result: ToolResult<unknown>
-): AgentState {
-  if (!result.success) {
+/**
+ * 把 AgentTrace 的执行结果写回 AgentState（Runtime 才是 State 的唯一写入者）。
+ *
+ * Phase 2 暂用 switch(trace.tool) 分发；Phase 3+ 会把「Tool → State 变更」下沉为
+ * Tool 自己声明的 applyResult / State Reducer，让 Runtime 不再认识具体 Tool。
+ */
+function applyTrace(state: AgentState, trace: AgentTrace): AgentState {
+  if (trace.status === "failed") {
     return {
       ...state,
-      errors: [...state.errors, result.error ?? "Tool failed"],
+      errors: [...state.errors, trace.error ?? "Tool execution failed"],
     };
   }
 
-  switch (tool) {
+  switch (trace.tool) {
     case "planner":
-      return { ...state, plan: result.data as UIPlan, errors: [] };
+      return { ...state, plan: trace.output as UIPlan, errors: [] };
     case "retrieve_design_context":
       return {
         ...state,
-        contextData: result.data as Record<string, unknown>,
+        contextData: trace.output as Record<string, unknown>,
       };
     default:
       return state;
@@ -105,30 +117,40 @@ export async function runAgent(
       state = { ...state, plannerAttempts: state.plannerAttempts + 1 };
     }
 
-    state = updateStage(state, TOOL_STAGE[tool]);
 
     const attempt = tool === "planner" ? state.plannerAttempts : undefined;
     const input = buildToolInput(state, tool);
-    const startedAt = Date.now();
+    state = updateStage(state, TOOL_STAGE[tool]);
 
-    const result = await executeTool(
+    // Tool Call → TOOL_CALL event（history 最小化：仅 tool，不含 duration / input / output）。
+    state = appendEvent(state, createEvent("TOOL_CALL", { tool }));
+
+    // Executor 内部已把 ToolResult 归一化为 AgentTrace；Runtime 只消费最终 Trace。
+    const trace = await executeTool(
       tool,
       input,
       buildToolContext(state),
       DEFAULT_TOOL_POLICY,
-      state.toolCallCount
+      state.toolCallCount,
+      attempt
+    );
+
+    // Tool Result → TOOL_RESULT event（history 最小化：tool + success，不含 duration）。
+    state = appendEvent(
+      state,
+      createEvent("TOOL_RESULT", {
+        tool,
+        success: trace.status === "success",
+      })
     );
 
     // 记录 Tool 执行 Trace（完整执行细节），与 history 分离、不重复。
-    state = {
-      ...state,
-      toolCallCount: state.toolCallCount + 1,
-      traces: [
-        ...state.traces,
-        buildToolTrace(tool, attempt, input, startedAt, result),
-      ],
-    };
+    state = appendTrace(
+      { ...state, toolCallCount: state.toolCallCount + 1 },
+      trace
+    );
 
-    state = applyToolResult(state, tool, result);
+    // 根据 Trace 更新 State（plan / contextData / errors）。
+    state = applyTrace(state, trace);
   }
 }

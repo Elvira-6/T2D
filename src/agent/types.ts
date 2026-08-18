@@ -28,9 +28,9 @@ export type AgentAction = "CALL_TOOL" | "DONE" | "FAIL";
 /**
  * Agent 事件类型（Event Trace 溯源）。
  *
- * 注意（Phase 2）：TOOL_CALL / TOOL_RESULT 已被 `traces` 取代 ——
- * 工具执行细节不再塞进 history，避免 history 变成「大杂烩」。
- * 这里保留该词表以备未来（如需要最小化的 tool outcome 事件）。
+ * 注意（Phase 2）：工具执行细节不塞进 history，避免 history 变成「大杂烩」。
+ * 但 history 仍保留「最小化」的 TOOL_CALL / TOOL_RESULT 事件（仅 tool + success，
+ * 不含 duration / input / output）—— 完整执行细节由 `traces`（AgentTrace）承载。
  */
 export type AgentEventType =
   | "STATE_CHANGE"
@@ -61,13 +61,21 @@ export type ToolStatus = "success" | "failed";
  */
 export interface AgentTrace {
   id: string;
+
   tool: string;
+
   status: ToolStatus;
+
   startedAt: number;
+
   durationMs: number;
+
   attempt?: number;
+
   input?: unknown;
+
   output?: unknown;
+  
   error?: string;
 }
 
@@ -94,6 +102,7 @@ export interface AgentState {
   /** Tool / Retrieval 执行记录（每次工具执行的完整细节） */
   traces: AgentTrace[];
 
+  /** Agent Runtime 循环执行的步数（每轮 while 循环 +1，含终态步） */
   stepCount: number;
 
   maxSteps: number;
@@ -102,5 +111,6 @@ export interface AgentState {
 
   maxPlannerAttempts: number;
 
+  /** 实际调用的 Tool 次数（仅 CALL_TOOL 分支 +1；与 stepCount 正交，勿合并） */
   toolCallCount: number;
 }
