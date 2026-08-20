@@ -41,7 +41,7 @@ const TOOL_STAGE: Record<AgentToolName, AgentStage> = {
   retrieve_design_context: "RETRIEVING",
 };
 
-type DecideFn = (
+export type DecideFn = (
   state: AgentState
 ) => AgentDecision | Promise<AgentDecision>;
 

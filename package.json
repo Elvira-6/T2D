@@ -10,7 +10,10 @@
     "lint": "next lint",
     "test:schema": "tsx scripts/test-schema.ts",
     "test:runtime": "tsx scripts/test-tool-runtime.ts",
-    "demo:phase2": "tsx src/agent/phase2-demo.ts"
+    "test:decision": "tsx scripts/test-decision-engine.ts",
+    "test:service": "tsx scripts/test-run-service.ts",
+    "demo:phase2": "tsx src/agent/phase2-demo.ts",
+    "demo:phase3": "tsx src/agent/phase3-demo.ts"
   },
   "dependencies": {
     "@ai-sdk/deepseek": "^3.0.28",

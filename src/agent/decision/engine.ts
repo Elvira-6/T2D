@@ -36,7 +36,7 @@ export async function decideNextAction(
     temperature: 0,
   });
 
-  console.log("result",result)
+  console.log("result",result.output)
 
   // 二次 runtime 校验（与 planner.tool 同一模式）：
   // 即使 SDK 已结构化输出，仍用 Zod.parse 兜底。

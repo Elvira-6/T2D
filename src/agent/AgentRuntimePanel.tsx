@@ -1,26 +1,23 @@
 "use client";
 
 import { useCallback, useState } from "react";
-import type { AgentEvent, AgentStage, AgentState, AgentTrace } from "./types";
+import type { AgentRunResponse } from "./api/types";
+import type { AgentEvent, AgentTrace } from "./types";
 import { Play, Loader2, Terminal } from "lucide-react";
 
 // ============================================================
-// Phase 2 — Agent Runtime 演示面板
-//   通过 /api/agent/plan 在服务端跑 Agent 状态机，双视图展示：
+// Phase 3.1 — Agent Runtime 演示面板（Agent Application 边界）
+//   通过 POST /api/agent/run 在服务端跑 Agent，展示 AgentRunResponse：
+//     - Run Summary（steps / tool calls / success / failed / duration）
+//     - Plan / Design Context 摘要
 //     - Tool Trace（每次工具执行：tool / duration / status）
-//     - Agent Timeline（生命周期事件：STATE_CHANGE / ERROR）
+//     - Agent Timeline（生命周期事件：STATE_CHANGE / TOOL_CALL / ERROR）
+//   前端只消费 AgentRunResponse，不直接接触 Runtime 内部类型。
 // ============================================================
 
-const STAGE_COLOR: Record<AgentStage, string> = {
-  IDLE: "text-slate-400 bg-slate-800",
-  PLANNING: "text-violet-300 bg-violet-500/15",
-  RETRIEVING: "text-cyan-300 bg-cyan-500/15",
-  GENERATING: "text-blue-300 bg-blue-500/15",
-  VALIDATING: "text-amber-300 bg-amber-500/15",
-  REPAIRING: "text-orange-300 bg-orange-500/15",
-  WAITING_HUMAN: "text-slate-300 bg-slate-700",
-  COMPLETED: "text-emerald-300 bg-emerald-500/15",
-  FAILED: "text-red-300 bg-red-500/15",
+const STATUS_COLOR: Record<AgentRunResponse["status"], string> = {
+  completed: "text-emerald-300 bg-emerald-500/15",
+  failed: "text-red-300 bg-red-500/15",
 };
 
 const EVENT_COLOR: Record<AgentEvent["type"], string> = {
@@ -30,6 +27,10 @@ const EVENT_COLOR: Record<AgentEvent["type"], string> = {
   ERROR: "text-red-400",
   REPAIR: "text-orange-400",
 };
+
+function formatDuration(ms: number): string {
+  return ms >= 1000 ? `${(ms / 1000).toFixed(2)}s` : `${ms}ms`;
+}
 
 /** 从事件 payload 中提取简短说明 */
 function eventDetail(ev: AgentEvent): string | null {
@@ -64,7 +65,7 @@ function TraceRow({ trace }: { trace: AgentTrace }) {
       <span
         className={`${ok ? "text-emerald-400" : "text-red-400"} mt-0.5 leading-4`}
       >
-        ●
+        {ok ? "✓" : "✕"}
       </span>
       <span className={ok ? "text-emerald-300" : "text-red-300"}>
         {trace.tool}
@@ -108,7 +109,7 @@ function ContextSummary({ data }: { data: Record<string, unknown> }) {
 }
 
 export function AgentRuntimePanel() {
-  const [result, setResult] = useState<AgentState | null>(null);
+  const [result, setResult] = useState<AgentRunResponse | null>(null);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -117,7 +118,7 @@ export function AgentRuntimePanel() {
     setError(null);
     setResult(null);
     try {
-      const res = await fetch("/api/agent/plan", {
+      const res = await fetch("/api/agent/run", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -126,11 +127,11 @@ export function AgentRuntimePanel() {
         }),
       });
       const json = await res.json();
-      if (!json.ok) {
+      console.log("/api/agent/run",res)
+      if (!json.success) {
         setError(json.error ?? "Agent failed");
       } else {
-        console.log("planner result", json.result);
-        setResult(json.result as AgentState);
+        setResult(json as AgentRunResponse);
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -143,7 +144,7 @@ export function AgentRuntimePanel() {
     <div className="space-y-3 pt-3 border-t border-slate-800">
       <h4 className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider flex items-center">
         <Terminal className="w-3.5 h-3.5 mr-1.5 text-violet-400" />
-        Agent Runtime · Phase 2
+        Agent Runtime · Phase 3.1
       </h4>
 
       <button
@@ -159,7 +160,7 @@ export function AgentRuntimePanel() {
         ) : (
           <>
             <Play className="w-3.5 h-3.5" />
-            <span>运行 Agent（Plan → Retrieve）</span>
+            <span>运行 Agent（Decision Engine）</span>
           </>
         )}
       </button>
@@ -173,9 +174,9 @@ export function AgentRuntimePanel() {
           {/* 汇总行 */}
           <div className="flex items-center flex-wrap gap-1.5">
             <span
-              className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${STAGE_COLOR[result.stage]}`}
+              className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${STATUS_COLOR[result.status]}`}
             >
-              {result.stage}
+              {result.status}
             </span>
             <span className="text-[10px] text-slate-500 font-mono">
               steps={result.stepCount}
@@ -184,17 +185,44 @@ export function AgentRuntimePanel() {
               tools={result.toolCallCount}
             </span>
             <span className="text-[10px] text-slate-500 font-mono">
-              attempts={result.plannerAttempts}/{result.maxPlannerAttempts}
-            </span>
-            <span className="text-[10px] text-slate-500 font-mono">
-              errors={result.errors.length}
+              {formatDuration(result.durationMs)}
             </span>
           </div>
 
-          {/* 错误信息（若 planner 失败） */}
-          {result.errors.length > 0 && (
-            <div className="text-[10px] text-red-400 break-all">
-              {result.errors[result.errors.length - 1]}
+          {/* Run Summary（Observability 基础） */}
+          <div className="p-2 bg-slate-950 border border-slate-800 rounded grid grid-cols-2 gap-x-3 gap-y-0.5 text-[10px] font-mono">
+            <span className="text-slate-500">totalSteps</span>
+            <span className="text-slate-300 text-right">
+              {result.summary.totalSteps}
+            </span>
+            <span className="text-slate-500">totalToolCalls</span>
+            <span className="text-slate-300 text-right">
+              {result.summary.totalToolCalls}
+            </span>
+            <span className="text-slate-500">success / failed</span>
+            <span className="text-slate-300 text-right">
+              {result.summary.successfulToolCalls} /{" "}
+              {result.summary.failedToolCalls}
+            </span>
+          </div>
+
+          {/* 错误面板（若 Agent 失败） */}
+          {(result.error || result.errors.length > 0) && (
+            <div className="p-2 bg-red-500/5 border border-red-900/50 rounded space-y-1">
+              <div className="text-[10px] font-semibold text-red-400 uppercase tracking-wider">
+                Errors ({result.errors.length})
+              </div>
+              {result.errors.length > 0 ? (
+                result.errors.map((e, i) => (
+                  <div key={i} className="text-[10px] text-red-300 break-all">
+                    {e}
+                  </div>
+                ))
+              ) : (
+                <div className="text-[10px] text-red-300 break-all">
+                  {result.error}
+                </div>
+              )}
             </div>
           )}
 
