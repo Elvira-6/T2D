@@ -10,6 +10,7 @@ export const DEFAULT_TOOL_POLICY: ToolPolicy = {
     "planner",
     "retrieve_design_context",
     "generator",
+    "validator",
   ],
 
   maxToolCalls: 10,

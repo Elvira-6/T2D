@@ -21,6 +21,12 @@ export interface DecisionContext {
   /** 是否已生成 AST（投影布尔值，避免把整棵 AST 塞给 LLM） */
   hasAst: boolean;
 
+  /** AST 校验状态（NOT_RUN / VALID / INVALID，Phase 3.3） */
+  validationStatus: "NOT_RUN" | "VALID" | "INVALID";
+
+  /** Repair 已尝试次数（Phase 3.3-B 使用） */
+  repairAttempts: number;
+
   errors: string[];
 
   stepCount: number;
@@ -47,6 +53,14 @@ export function buildDecisionContext(
     contextData: state.contextData,
 
     hasAst: Boolean(state.ast),
+
+    validationStatus: !state.validation
+      ? "NOT_RUN"
+      : state.validation.valid
+        ? "VALID"
+        : "INVALID",
+
+    repairAttempts: state.repairAttempts,
 
     errors: state.errors,
 

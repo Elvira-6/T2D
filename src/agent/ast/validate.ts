@@ -27,12 +27,20 @@ import { getComponentCapability } from "@/inspector/capabilities";
 //     2. design 字段是否为该组件声明（+ token 取值是否在 options 内）
 //     3. props 字段是否为该组件声明（+ 枚举取值是否在 options 内）
 //     4. className 一律禁止（视觉必须走 design token）
+//
+//   每个 issue 带 code + category（供 Phase 3.3 Validator / Repair 消费）。
 // ============================================================
+
+export type DesignConstraintCategory = "component" | "design";
 
 export interface DesignConstraintIssue {
   /** 节点路径，如 hero.design.background（语义 id，便于定位） */
   path: string;
   message: string;
+  /** 机器可读错误码（UNSUPPORTED_PROP / UNKNOWN_COMPONENT / …） */
+  code: string;
+  /** component = 组件能力；design = 设计 token / className 约束 */
+  category: DesignConstraintCategory;
 }
 
 function validateNode(node: CoreASTNode, issues: DesignConstraintIssue[]): void {
@@ -42,6 +50,8 @@ function validateNode(node: CoreASTNode, issues: DesignConstraintIssue[]): void 
   if (!capability) {
     issues.push({
       path: node.id,
+      code: "UNKNOWN_COMPONENT",
+      category: "component",
       message: `组件类型 "${node.type}" 不在 Component Registry 中`,
     });
     for (const child of node.children ?? []) validateNode(child, issues);
@@ -53,6 +63,8 @@ function validateNode(node: CoreASTNode, issues: DesignConstraintIssue[]): void 
     if (!capability.design.has(key)) {
       issues.push({
         path: `${node.id}.design.${key}`,
+        code: "UNSUPPORTED_DESIGN_FIELD",
+        category: "design",
         message: `组件 "${node.type}" 不支持 design 字段 "${key}"`,
       });
       continue;
@@ -61,6 +73,8 @@ function validateNode(node: CoreASTNode, issues: DesignConstraintIssue[]): void 
     if (allowed && typeof value === "string" && !allowed.includes(value)) {
       issues.push({
         path: `${node.id}.design.${key}`,
+        code: "INVALID_DESIGN_TOKEN",
+        category: "design",
         message: `Design Token "${value}" 不在 "${key}" 的合法取值中（${allowed.join(" / ")}）`,
       });
     }
@@ -71,6 +85,8 @@ function validateNode(node: CoreASTNode, issues: DesignConstraintIssue[]): void 
     if (key === "className") {
       issues.push({
         path: `${node.id}.props.className`,
+        code: "FORBIDDEN_CLASS_NAME",
+        category: "design",
         message: "Generator AST 禁止 className；视觉属性必须通过 design token 表达",
       });
       continue;
@@ -78,6 +94,8 @@ function validateNode(node: CoreASTNode, issues: DesignConstraintIssue[]): void 
     if (!capability.props.has(key)) {
       issues.push({
         path: `${node.id}.props.${key}`,
+        code: "UNSUPPORTED_PROP",
+        category: "component",
         message: `组件 "${node.type}" 不支持 props 字段 "${key}"`,
       });
       continue;
@@ -86,6 +104,8 @@ function validateNode(node: CoreASTNode, issues: DesignConstraintIssue[]): void 
     if (allowed && typeof value === "string" && !allowed.includes(value)) {
       issues.push({
         path: `${node.id}.props.${key}`,
+        code: "INVALID_PROP_VALUE",
+        category: "component",
         message: `属性 "${key}" 的值 "${value}" 不在合法取值中（${allowed.join(" / ")}）`,
       });
     }

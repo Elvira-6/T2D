@@ -24,6 +24,8 @@ export function createInitialState(
     plannerAttempts: 0,
     maxPlannerAttempts: 2,
     toolCallCount: 0,
+    validation: undefined,
+    repairAttempts: 0,
   };
 }
 

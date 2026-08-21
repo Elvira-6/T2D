@@ -1,6 +1,7 @@
 import { CoreASTNode } from "@/types/ast";
 import { UIPlan } from "./schemas/plan.schema";
 import type { AgentDecisionTrace } from "./decision/types";
+import type { ValidationResult } from "./validation/types";
 
 // ============================================================
 // Phase 2 — Agent Runtime 类型契约
@@ -91,6 +92,12 @@ export interface AgentState {
   plan?: UIPlan;
 
   ast?: CoreASTNode;
+
+  /** Validator Tool 的结果（AST 校验状态，Phase 3.3） */
+  validation?: ValidationResult;
+
+  /** Repair 已尝试次数（Phase 3.3-B 使用，3.3-A 先占位为 0） */
+  repairAttempts: number;
 
   /** 工具检索回来的设计上下文（retrieve_design_context 的结果） */
   contextData?: Record<string, unknown>;

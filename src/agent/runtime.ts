@@ -16,6 +16,7 @@ import { createDecisionTrace } from "./trace";
 
 import { UIPlan } from "./schemas/plan.schema";
 import { CoreASTNode } from "@/types/ast";
+import type { ValidationResult } from "./validation/types";
 
 import {
   initTools,
@@ -41,6 +42,7 @@ const TOOL_STAGE: Record<AgentToolName, AgentStage> = {
   planner: "PLANNING",
   retrieve_design_context: "RETRIEVING",
   generator: "GENERATING",
+  validator: "VALIDATING",
 };
 
 export type DecideFn = (
@@ -76,6 +78,12 @@ function buildToolInput(state: AgentState, tool: AgentToolName): unknown {
         plan: state.plan,
         designContext: state.contextData,
       };
+    case "validator":
+      if (!state.ast) {
+        throw new Error("Validator requires AST");
+      }
+
+      return { ast: state.ast };
   }
 }
 
@@ -103,6 +111,8 @@ function applyTrace(state: AgentState, trace: AgentTrace): AgentState {
       };
     case "generator":
       return { ...state, ast: trace.output as CoreASTNode,errors: [], };
+    case "validator":
+      return { ...state, validation: trace.output as ValidationResult };
     default:
       return state;
   }

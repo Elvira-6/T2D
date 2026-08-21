@@ -61,7 +61,25 @@ export function decideNextActionByRule(
   }
 
   /**
-   * 4. AST 已生成 → 完成
+   * 4. AST 已生成但还没有校验结果 → 调用 Validator
    */
-  return { action: "DONE", reason: "CoreASTNode 已生成" };
+  if (!state.validation) {
+    return {
+      action: "CALL_TOOL",
+      tool: "validator",
+      reason: "AST 已生成，调用 validator 校验结构/组件能力/设计 token",
+    };
+  }
+
+  /**
+   * 5. Validator 通过 → 完成
+   */
+  if (state.validation.valid) {
+    return { action: "DONE", reason: "AST 校验通过" };
+  }
+
+  /**
+   * 6. Validator 未通过（Phase 3.3-A 尚未接入 Repair）→ 失败
+   */
+  return { action: "FAIL", reason: "AST 校验失败（Phase 3.3-A 无 Repair）" };
 }

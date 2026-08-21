@@ -45,6 +45,17 @@ export { plannerTool } from "./tools/planning/planner.tool";
 export { retrieveDesignContextTool } from "./tools/retrieval/designContext.tool";
 export { generatorTool } from "./tools/generation/generator.tool";
 export type { GeneratorInput } from "./tools/generation/generator.tool";
+export { validatorTool } from "./tools/validation/validator.tool";
+export type { ValidatorInput } from "./tools/validation/validator.tool";
+
+export { validateAST } from "./validation";
+export type {
+  ValidationResult,
+  ValidationIssue,
+  ValidationSummary,
+  ValidationSeverity,
+  ValidationCategory,
+} from "./validation";
 
 export {
   normalizeAST,

@@ -6,6 +6,8 @@ import { retrieveDesignContextTool } from "./retrieval/designContext.tool";
 
 import { generatorTool } from "./generation/generator.tool";
 
+import { validatorTool } from "./validation/validator.tool";
+
 // ============================================================
 // Phase 2 — Tool 层公共出口
 //   initTools() 幂等初始化（Next.js dev / HMR 下重复调用安全）。
@@ -21,6 +23,7 @@ export function initTools() {
   registerTool(plannerTool);
   registerTool(retrieveDesignContextTool);
   registerTool(generatorTool);
+  registerTool(validatorTool);
 
   initialized = true;
 }

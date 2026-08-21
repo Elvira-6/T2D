@@ -35,7 +35,9 @@ export function buildDecisionPrompt(
 - 如果缺少必要上下文，调用相应的检索工具。
 - 如果还没有计划，调用 planner。
 - 如果已有计划和设计上下文、但还没有生成 AST，调用 generator。
-- 如果 AST 已经生成，返回 DONE。
+- 如果 AST 已经生成、但还没有 validation，调用 validator。
+- 如果 validation 已通过（valid），返回 DONE。
+- 如果 validation 失败（invalid），返回 FAIL（当前阶段尚无 Repair）。
 - 如果当前目标已完成，返回 DONE。
 - 始终给出简洁的理由（reason）。
 
