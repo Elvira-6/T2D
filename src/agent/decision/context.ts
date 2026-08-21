@@ -18,6 +18,9 @@ export interface DecisionContext {
 
   contextData?: unknown;
 
+  /** 是否已生成 AST（投影布尔值，避免把整棵 AST 塞给 LLM） */
+  hasAst: boolean;
+
   errors: string[];
 
   stepCount: number;
@@ -42,6 +45,8 @@ export function buildDecisionContext(
     plan: state.plan,
 
     contextData: state.contextData,
+
+    hasAst: Boolean(state.ast),
 
     errors: state.errors,
 

@@ -43,6 +43,17 @@ export {
 } from "./trace";
 export { plannerTool } from "./tools/planning/planner.tool";
 export { retrieveDesignContextTool } from "./tools/retrieval/designContext.tool";
+export { generatorTool } from "./tools/generation/generator.tool";
+export type { GeneratorInput } from "./tools/generation/generator.tool";
+
+export {
+  normalizeAST,
+  sanitizeKey,
+  uniqueSibling,
+  GeneratorASTNodeSchema,
+  validateDesignConstraints,
+} from "./ast";
+export type { GeneratorASTNode, DesignConstraintIssue } from "./ast";
 
 export {
   initTools,

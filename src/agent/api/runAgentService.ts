@@ -41,6 +41,8 @@ export async function runAgentService(
 
     contextData: finalState.contextData,
 
+    ast: finalState.ast,
+
     traces: finalState.traces,
 
     history: finalState.history,

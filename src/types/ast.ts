@@ -52,9 +52,15 @@ export const CoreASTNodeSchema: z.ZodType<CoreASTNode> = z.lazy(() =>
     .object({
       id: z.string().describe("节点唯一ID，用于选择与局部高亮"),
       type: ComponentTypeSchema.describe("组件类型"),
-      schemaVersion: z.number().optional().default(1).describe("AST 协议版本号"),
+      schemaVersion: z
+        .number()
+        .optional()
+        .default(1)
+        .describe("AST 协议版本号"),
 
-      // 变长字典：收拢所有 UI 属性、Tailwind 类名与文本内容
+      // UI 属性字典。
+      // Core Schema 允许扩展字段；具体组件是否支持某字段，
+      // 由 Component Registry / validateDesignConstraints 决定。
       props: z
         .object({
           className: z.string().optional().describe("Tailwind CSS 类名"),
@@ -64,6 +70,9 @@ export const CoreASTNodeSchema: z.ZodType<CoreASTNode> = z.lazy(() =>
         })
         .passthrough(), // 关键：放行未知字段
 
+      // Design Token 字典。
+      // Core Schema 负责结构类型；具体字段和 token 合法性
+      // 由 Design System / Component Registry 校验。
       design: z
         .object({
           background: z.string().optional().describe("背景色 Design Token"),
@@ -82,7 +91,7 @@ export const CoreASTNodeSchema: z.ZodType<CoreASTNode> = z.lazy(() =>
         .optional()
         .describe("子节点列表"),
     })
-    .passthrough()
+    .passthrough(),
 );
 
 // ============================================================
@@ -92,7 +101,7 @@ export function createNode(
   id: string,
   type: ComponentType,
   props: Record<string, any> = {},
-  children?: CoreASTNode[]
+  children?: CoreASTNode[],
 ): CoreASTNode {
   return { id, type, schemaVersion: 1, props, children };
 }

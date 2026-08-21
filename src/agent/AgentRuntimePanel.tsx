@@ -3,6 +3,7 @@
 import { useCallback, useState } from "react";
 import type { AgentRunResponse } from "./api/types";
 import type { AgentEvent, AgentTrace } from "./types";
+import type { CoreASTNode } from "@/types/ast";
 import { Play, Loader2, Terminal } from "lucide-react";
 
 // ============================================================
@@ -104,6 +105,33 @@ function ContextSummary({ data }: { data: Record<string, unknown> }) {
       <div className="text-[10px] text-slate-500 font-mono">
         tokens: {tokenKeys.join(", ")}
       </div>
+    </div>
+  );
+}
+
+/** 生成器输出的 AST 摘要（树形概览 + 节点计数） */
+function AstSummary({ ast }: { ast: CoreASTNode }) {
+  const lines: string[] = [];
+  const walk = (node: CoreASTNode, depth: number) => {
+    const label = node.props && "text" in node.props
+      ? `${node.type} "${String(node.props.text)}"`
+      : node.type;
+    lines.push(`${"  ".repeat(depth)}${label}`);
+    for (const child of node.children ?? []) walk(child, depth + 1);
+  };
+  walk(ast, 0);
+
+  const count = (n: CoreASTNode): number =>
+    1 + (n.children ?? []).reduce((sum, c) => sum + count(c), 0);
+
+  return (
+    <div className="p-2 bg-slate-950 border border-slate-800 rounded space-y-1">
+      <div className="text-[10px] text-amber-300 font-mono">
+        ast: {count(ast)} nodes (root {ast.type})
+      </div>
+      <pre className="text-[10px] text-slate-400 font-mono leading-4 overflow-x-auto">
+        {lines.join("\n")}
+      </pre>
     </div>
   );
 }
@@ -251,6 +279,9 @@ export function AgentRuntimePanel() {
 
           {/* 检索到的设计上下文摘要 */}
           {result.contextData && <ContextSummary data={result.contextData} />}
+
+          {/* 生成器输出的 AST 摘要 */}
+          {result.ast && <AstSummary ast={result.ast} />}
 
           {/* Tool Trace：每次工具执行 */}
           {result.traces.length > 0 && (

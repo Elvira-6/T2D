@@ -13,8 +13,11 @@ export type ToolCategory =
   | "mutation"
   | "system";
 
-/** 已注册 Tool 名称（Phase 2 仅 planner + retrieve_design_context） */
-export type AgentToolName = "planner" | "retrieve_design_context";
+/** 已注册 Tool 名称（Phase 3.2 新增 generator） */
+export type AgentToolName =
+  | "planner"
+  | "retrieve_design_context"
+  | "generator";
 
 export interface ToolContext {
   agentId: string;

@@ -9,6 +9,7 @@ export const DEFAULT_TOOL_POLICY: ToolPolicy = {
   allowedTools: [
     "planner",
     "retrieve_design_context",
+    "generator",
   ],
 
   maxToolCalls: 10,

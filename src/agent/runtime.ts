@@ -15,6 +15,7 @@ import { createEvent } from "./events";
 import { createDecisionTrace } from "./trace";
 
 import { UIPlan } from "./schemas/plan.schema";
+import { CoreASTNode } from "@/types/ast";
 
 import {
   initTools,
@@ -39,6 +40,7 @@ import {
 const TOOL_STAGE: Record<AgentToolName, AgentStage> = {
   planner: "PLANNING",
   retrieve_design_context: "RETRIEVING",
+  generator: "GENERATING",
 };
 
 export type DecideFn = (
@@ -61,6 +63,19 @@ function buildToolInput(state: AgentState, tool: AgentToolName): unknown {
       return state.prompt;
     case "retrieve_design_context":
       return undefined;
+    case "generator":
+      if (!state.plan) {
+        throw new Error("Generator requires plan");
+      }
+
+      if (!state.contextData) {
+        throw new Error("Generator requires design context");
+      }
+
+      return {
+        plan: state.plan,
+        designContext: state.contextData,
+      };
   }
 }
 
@@ -86,6 +101,8 @@ function applyTrace(state: AgentState, trace: AgentTrace): AgentState {
         ...state,
         contextData: trace.output as Record<string, unknown>,
       };
+    case "generator":
+      return { ...state, ast: trace.output as CoreASTNode,errors: [], };
     default:
       return state;
   }

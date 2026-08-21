@@ -50,7 +50,18 @@ export function decideNextActionByRule(
   }
 
   /**
-   * Phase 2 边界：尚无 Generator（Phase 3 加入）。
+   * 3. 有 Plan + Design Context 但还没有 AST → 调用 Generator
    */
-  return { action: "DONE", reason: "规划与设计上下文均已就绪" };
+  if (!state.ast) {
+    return {
+      action: "CALL_TOOL",
+      tool: "generator",
+      reason: "规划与设计上下文均已就绪，生成 CoreASTNode",
+    };
+  }
+
+  /**
+   * 4. AST 已生成 → 完成
+   */
+  return { action: "DONE", reason: "CoreASTNode 已生成" };
 }

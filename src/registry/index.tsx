@@ -169,6 +169,15 @@ const ButtonSchema: InspectorSchema = {
           options: DESIGN_TOKENS.sizes,
           defaultValue: "md",
         },
+        {
+          id: "href",
+          label: "Link URL",
+          path: ["props", "href"],
+          controlType: "text-input",
+          mutation: { operation: "SET_PROP" },
+          defaultValue: "",
+          description: "跳转链接（可选，用于 Button 表达导航行为）",
+        },
       ],
     },
     {

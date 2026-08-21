@@ -1,19 +1,28 @@
 import { COMPONENT_REGISTRY } from "@/registry";
 import { DESIGN_TOKENS } from "@/tokens/tokenRegistry";
+import { componentCapabilityKeys } from "@/inspector/capabilities";
 
 import { AgentTool, ToolResult } from "../types";
 
 // ============================================================
 // Phase 2 — retrieve_design_context Tool
 //   真正读取现有 DESIGN_TOKENS + COMPONENT_REGISTRY（非硬编码拷贝）。
-//   让 Agent 与现有 UI Engine（Registry / Token）真正接通。
+//   让 Agent 与现有 UI Engine（Registry / Token）真正接通，并暴露
+//   每个组件的「能力清单」（props / design 字段），供 Generator
+//   只生成组件声明支持的字段。
 // ============================================================
+
+export interface ComponentCapabilitiesData {
+  props: string[];
+  design: string[];
+}
 
 export interface DesignContextData {
   components: Array<{
     type: string;
     label: string;
     hasInspector: boolean;
+    capabilities: ComponentCapabilitiesData;
   }>;
 
   tokens: {
@@ -41,6 +50,7 @@ export const retrieveDesignContextTool: AgentTool<
       type: spec.type,
       label: spec.label,
       hasInspector: Boolean(spec.inspectorSchema),
+      capabilities: componentCapabilityKeys(spec.type),
     }));
 
     return {

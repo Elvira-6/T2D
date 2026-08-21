@@ -1,5 +1,6 @@
 import { UIPlan } from "../schemas/plan.schema";
 import { AgentEvent, AgentTrace } from "../types";
+import { CoreASTNode } from "@/types/ast";
 
 // ============================================================
 // Phase 3.1 — Agent Run API Contract
@@ -36,6 +37,8 @@ export interface AgentRunResponse {
   plan?: UIPlan;
 
   contextData?: Record<string, unknown>;
+
+  ast?: CoreASTNode;
 
   traces: AgentTrace[];
 
