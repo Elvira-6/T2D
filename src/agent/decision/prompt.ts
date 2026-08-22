@@ -37,7 +37,8 @@ export function buildDecisionPrompt(
 - 如果已有计划和设计上下文、但还没有生成 AST，调用 generator。
 - 如果 AST 已经生成、但还没有 validation，调用 validator。
 - 如果 validation 已通过（valid），返回 DONE。
-- 如果 validation 失败（invalid），返回 FAIL（当前阶段尚无 Repair）。
+- 如果 validation 失败（invalid）且 repairAttempts < maxRepairAttempts，调用 repair。
+- 如果 validation 失败（invalid）且 repairAttempts >= maxRepairAttempts，返回 FAIL。
 - 如果当前目标已完成，返回 DONE。
 - 始终给出简洁的理由（reason）。
 

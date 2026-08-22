@@ -2,7 +2,7 @@ import { generateText, Output } from "ai";
 
 import { getModel } from "../../llm/model";
 import { CoreASTNode, CoreASTNodeSchema } from "@/types/ast";
-import { UIPlan } from "../../schemas/plan.schema";
+import { UIPlan } from "../planning/plan.schema";
 import { AgentTool, ToolResult } from "../types";
 import { DesignContextData } from "../retrieval/designContext.tool";
 import { normalizeAST, GeneratorASTNodeSchema, validateDesignConstraints } from "../../ast";

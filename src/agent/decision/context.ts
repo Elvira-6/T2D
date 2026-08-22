@@ -27,6 +27,9 @@ export interface DecisionContext {
   /** Repair 已尝试次数（Phase 3.3-B 使用） */
   repairAttempts: number;
 
+  /** Repair 次数上限（bounded self-repair loop 的硬边界） */
+  maxRepairAttempts: number;
+
   errors: string[];
 
   stepCount: number;
@@ -61,6 +64,8 @@ export function buildDecisionContext(
         : "INVALID",
 
     repairAttempts: state.repairAttempts,
+
+    maxRepairAttempts: state.maxRepairAttempts,
 
     errors: state.errors,
 

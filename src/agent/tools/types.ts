@@ -13,12 +13,13 @@ export type ToolCategory =
   | "mutation"
   | "system";
 
-/** 已注册 Tool 名称（Phase 3.3 新增 validator） */
+/** 已注册 Tool 名称（Phase 3.3-B 新增 repair） */
 export type AgentToolName =
   | "planner"
   | "retrieve_design_context"
   | "generator"
-  | "validator";
+  | "validator"
+  | "repair";
 
 export interface ToolContext {
   agentId: string;

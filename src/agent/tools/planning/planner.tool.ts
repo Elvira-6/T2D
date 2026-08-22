@@ -1,7 +1,7 @@
 import { generateText, Output } from "ai";
 
 import { getModel } from "../../llm/model";
-import { UIPlanSchema, UIPlan } from "../../schemas/plan.schema";
+import { UIPlanSchema, UIPlan } from "./plan.schema";
 import { AgentTool, ToolResult } from "../types";
 
 /**

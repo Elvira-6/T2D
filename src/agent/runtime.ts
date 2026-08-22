@@ -14,7 +14,7 @@ import {
 import { createEvent } from "./events";
 import { createDecisionTrace } from "./trace";
 
-import { UIPlan } from "./schemas/plan.schema";
+import { UIPlan } from "./tools/planning/plan.schema";
 import { CoreASTNode } from "@/types/ast";
 import type { ValidationResult } from "./validation/types";
 
@@ -43,6 +43,7 @@ const TOOL_STAGE: Record<AgentToolName, AgentStage> = {
   retrieve_design_context: "RETRIEVING",
   generator: "GENERATING",
   validator: "VALIDATING",
+  repair: "REPAIRING",
 };
 
 export type DecideFn = (
@@ -84,6 +85,19 @@ function buildToolInput(state: AgentState, tool: AgentToolName): unknown {
       }
 
       return { ast: state.ast };
+    case "repair":
+      if (!state.ast) {
+        throw new Error("Repair requires AST");
+      }
+
+      if (!state.validation) {
+        throw new Error("Repair requires validation result");
+      }
+
+      return {
+        ast: state.ast,
+        issues: state.validation.issues,
+      };
   }
 }
 
@@ -113,6 +127,12 @@ function applyTrace(state: AgentState, trace: AgentTrace): AgentState {
       return { ...state, ast: trace.output as CoreASTNode,errors: [], };
     case "validator":
       return { ...state, validation: trace.output as ValidationResult };
+    case "repair":
+      return {
+        ...state,
+        ast: trace.output as CoreASTNode,
+        validation: undefined,
+      };
     default:
       return state;
   }
@@ -164,6 +184,10 @@ export async function runAgent(
 
     if (tool === "planner") {
       state = { ...state, plannerAttempts: state.plannerAttempts + 1 };
+    }
+
+    if (tool === "repair") {
+      state = { ...state, repairAttempts: state.repairAttempts + 1 };
     }
 
     const attempt = tool === "planner" ? state.plannerAttempts : undefined;

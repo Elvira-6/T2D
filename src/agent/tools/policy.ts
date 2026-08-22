@@ -11,6 +11,7 @@ export const DEFAULT_TOOL_POLICY: ToolPolicy = {
     "retrieve_design_context",
     "generator",
     "validator",
+    "repair",
   ],
 
   maxToolCalls: 10,

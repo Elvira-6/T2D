@@ -1,5 +1,5 @@
 import { CoreASTNode } from "@/types/ast";
-import { UIPlan } from "./schemas/plan.schema";
+import { UIPlan } from "./tools/planning/plan.schema";
 import type { AgentDecisionTrace } from "./decision/types";
 import type { ValidationResult } from "./validation/types";
 
@@ -121,6 +121,9 @@ export interface AgentState {
   plannerAttempts: number;
 
   maxPlannerAttempts: number;
+
+  /** Repair 次数上限（Phase 3.3-B，bounded self-repair loop 的硬边界） */
+  maxRepairAttempts: number;
 
   /** 实际调用的 Tool 次数（仅 CALL_TOOL 分支 +1；与 stepCount 正交，勿合并） */
   toolCallCount: number;

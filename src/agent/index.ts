@@ -47,6 +47,10 @@ export { generatorTool } from "./tools/generation/generator.tool";
 export type { GeneratorInput } from "./tools/generation/generator.tool";
 export { validatorTool } from "./tools/validation/validator.tool";
 export type { ValidatorInput } from "./tools/validation/validator.tool";
+export { repairTool } from "./tools/repair/repair.tool";
+export type { RepairInput } from "./tools/repair/repair.tool";
+export { checkRepairScope, diffASTPaths } from "./tools/repair/scope";
+export type { RepairScope, RepairScopeResult } from "./tools/repair/scope";
 
 export { validateAST } from "./validation";
 export type {
@@ -93,8 +97,8 @@ export {
   ComponentIntentSchema,
   SectionPlanSchema,
   DesignDirectionSchema,
-} from "./schemas/plan.schema";
-export type { UIPlan } from "./schemas/plan.schema";
+} from "./tools/planning/plan.schema";
+export type { UIPlan } from "./tools/planning/plan.schema";
 
 export type {
   ToolCategory,

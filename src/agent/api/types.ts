@@ -1,4 +1,4 @@
-import { UIPlan } from "../schemas/plan.schema";
+import { UIPlan } from "../tools/planning/plan.schema";
 import { AgentEvent, AgentTrace } from "../types";
 import { CoreASTNode } from "@/types/ast";
 

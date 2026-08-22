@@ -79,7 +79,18 @@ export function decideNextActionByRule(
   }
 
   /**
-   * 6. Validator 未通过（Phase 3.3-A 尚未接入 Repair）→ 失败
+   * 6. Validator 未通过 → 若还有 Repair 预算则调用 repair，否则失败。
+   *    Repair 成功后 applyTrace 会清掉旧 validation，下一轮重新走 Validator，
+   *    形成 Observe → Decide → Act 的自修复循环，并被 maxRepairAttempts 限定
+   *    （bounded autonomous loop，避免无限 Validator↔Repair 循环）。
    */
-  return { action: "FAIL", reason: "AST 校验失败（Phase 3.3-A 无 Repair）" };
+  if (state.repairAttempts < state.maxRepairAttempts) {
+    return {
+      action: "CALL_TOOL",
+      tool: "repair",
+      reason: "AST 校验失败，调用 repair 做最小化修复",
+    };
+  }
+
+  return { action: "FAIL", reason: "超出最大 repair 次数，AST 仍非法" };
 }

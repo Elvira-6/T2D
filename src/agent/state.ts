@@ -26,6 +26,7 @@ export function createInitialState(
     toolCallCount: 0,
     validation: undefined,
     repairAttempts: 0,
+    maxRepairAttempts: 2,
   };
 }
 
